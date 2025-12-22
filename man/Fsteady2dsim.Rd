@@ -10,6 +10,13 @@ Fsteady2dsim(
   Qinf = list(Qp = 10, xp = 20.5, yp = 20.5)
 )
 }
+\arguments{
+\item{domain}{a 6 * 1 vector giving (nx,ny,x1,x2,y1,y2)}
+
+\item{TT}{a 1 * n vector giving transimisivity (L2/T) at each grid point.}
+
+\item{Qinf}{a list or data.frame giving pumping rates (Qp) and locations (xp,yp).}
+}
 \value{
 A data frame of two elements with grid showing generated grid and
 steady-state solution of head distribution.

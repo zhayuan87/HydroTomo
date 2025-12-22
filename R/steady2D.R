@@ -7,6 +7,9 @@
 #'
 #' @return A data frame of two elements with grid showing generated grid and
 #'    steady-state solution of head distribution.
+#' @param domain a 6 * 1 vector giving (nx,ny,x1,x2,y1,y2)
+#' @param TT a 1 * n vector giving transimisivity (L2/T) at each grid point.
+#' @param Qinf a list or data.frame giving pumping rates (Qp) and locations (xp,yp).
 #' @export
 #' @examples
 #' s <- Fsteady2dsim()
@@ -47,6 +50,13 @@ Fsteady2dsim <- function(domain=c(40,40,0,40,0,40),
   xy <- expand.grid(x=xmid, y = ymid)
   return(data.frame(xy, solution = s_steady))
 }
+
+#' 2-D diffusion function solver
+#' @param t time
+#' @param h initial condition (not important in steady-state solution)
+#' @param par parameters
+#' @return list of state variables (e.g., head values)
+#' @export
 
 diffusion2D <- function(t, h, par)   {
   with(par,{
