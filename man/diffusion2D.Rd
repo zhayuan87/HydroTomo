@@ -9,7 +9,7 @@ diffusion2D(t, h, par)
 \arguments{
 \item{t}{time}
 
-\item{h}{head}
+\item{h}{initial condition (not important in steady-state solution)}
 
 \item{par}{parameters}
 }

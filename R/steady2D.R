@@ -13,12 +13,7 @@
 #' @export
 #' @examples
 #' s <- Fsteady2dsim()
-#' library('ggplot2')
-#' ggplot(s) +
-#'   aes(x = x, y = y, fill = solution) +
-#'   geom_tile() +
-#'   scale_fill_viridis_c(option = "viridis", direction = 1) +
-#'   theme_minimal()
+#' Plotsteady2d(s,plotfile="steady2d.pdf")
 Fsteady2dsim <- function(domain=c(40,40,0,40,0,40),
                          TT=0.1,
                          Qinf=list(Qp=10,xp=20.5,yp=20.5)

@@ -1,9 +1,11 @@
 Package: HydroTomo
-Title: What the Package Does (One Line, Title Case)
+Title: Hydraulic Tomographic Pumping Test
 Version: 0.0.0.9000
 Authors@R: 
-    person("First", "Last", , "first.last@example.com", role = c("aut", "cre"))
-Description: What the package does (one paragraph).
+    person("Yuanyuan", "Zha", , "zhayuan87@whu.edu.cn", role = c("aut", "cre"))
+Description: 
+  This packages simulates the groundwater heads induced by pumping tests, and use inverse method to invert
+  the hydraulic parameters distribution so as to improve the future prediction.
 License: MIT + file LICENSE
 Encoding: UTF-8
 Roxygen: list(markdown = TRUE)
