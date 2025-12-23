@@ -65,7 +65,7 @@ inversePlot <- function(niterm=1,iterdf,trueh,trueK=NULL){
   # note that trueh is actually a list contains many pumping tests.
   np <- sapply(trueh,length) # get the number of observations for each test.
   ntest <- rep("test1",np[1])
-  if(i>=2){
+  if(length(np)>=2){
     for (i in 2:length(np)){
       ntest <- append(ntest,rep(paste0("test",i),np[i]))
     }
