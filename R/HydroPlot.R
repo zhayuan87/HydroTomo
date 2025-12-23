@@ -34,3 +34,84 @@ Plotsteady2d <- function(s, palette="viridis",plotshow = TRUE,
   }
   return(p)
 }
+
+
+
+#' now we can choose the best iteration to plot.
+#' estimated K plot.
+#' @export
+#' @param niter the number of iterations.
+#' @param iterdf the data.frame of iterations.
+#' @param trueK the true K field (used in synthetic case).
+#' @examples
+#' set.seed(100)
+#' trueK <- random2d(nsim=1)
+#' TT <- trueK[,-c(1,2)]
+#' trueh <- Fsteady2dsim(TT=TT)
+#' trueh <- trueh$solution
+#' n <- 1600
+#' nobs <- 25
+#' locx = c(15,18,22,25,30)
+#' locy = c(15,18,22,25,30)
+#' loc= expand.grid(x=locx,y=locy)
+#' loc_obs <- (loc$y-1)*40 + loc$x
+#' trueobsh <- trueh[loc_obs]
+#' loc_obs = list(loc_obs)
+#' trueobsh = list(trueobsh)
+#' result <- Finverse(loc_obs=loc_obs,trueobsh=trueobsh)
+#' inversePlot(niterm=5,iterdf = result,trueh = trueobsh,trueK=trueK)
+inversePlot <- function(niterm=1,iterdf,trueh,trueK=NULL){
+  # niterm = 5
+  # note that trueh is actually a list contains many pumping tests.
+  np <- sapply(trueh,length) # get the number of observations for each test.
+  ntest <- rep("test1",np[1])
+  if(i>=2){
+    for (i in 2:length(np)){
+      ntest <- append(ntest,rep(paste0("test",i),np[i]))
+    }
+  }
+
+  trueh <- unlist(trueh) # unlist
+  df <- data.frame(x=trueK$x,y=trueK$y,v=iterdf[[niterm]]$meanT,var=iterdf[[niterm]]$varT)
+  library(ggplot2)
+  p1<- ggplot(df) +
+    aes(x = x, y = y, fill = v) +
+    geom_tile()+
+    scale_fill_viridis_c(option = "viridis", direction = 1)+
+    ggtitle(label="estimated lnK value")
+  p2 <- ggplot(df) +
+    aes(x = x, y = y, fill = var) +
+    geom_tile()+
+    scale_fill_viridis_c(option = "viridis", direction = 1)+
+    ggtitle(label="estimated lnK variance")
+
+  dfh <- data.frame(trueh=trueh,simh=iterdf[[niterm]]$meanobsh,varh=iterdf[[niterm]]$varobsh,ntest=ntest)
+  #https://www.roelpeters.be/how-to-add-a-regression-equation-and-r-squared-in-ggplot2/
+  #https://rpkgs.datanovia.com/ggpubr/reference/stat_regline_equation.html
+  require(ggpubr)
+  p4 <- ggplot(dfh) +
+    geom_errorbar(aes(x = trueh,ymin=simh-varh^0.5,ymax=simh+varh^0.5),width=0.02,color="gray")+
+    geom_point(size=4,aes(x = trueh, y = simh,colour=ntest))+
+    geom_smooth(method = "lm", aes(x = trueh, y = simh),se=FALSE) +
+    stat_regline_equation(aes(x = trueh, y = simh),label.y = -0.5) +
+    stat_cor( aes(x = trueh, y = simh),label.y = -1) +
+    ggtitle(label="observation versus simulated head with variance")
+
+  p1
+  p2
+  p4
+
+  if(!is.null(trueK)){
+    scatterks <- data.frame(x=log(trueK$Tp),y=log(iterdf[[niterm]]$meanT))
+    p3 <- ggplot(scatterks) +
+      aes(x,y) +
+      geom_point(size=1)+
+      geom_smooth(method = "lm", se=T) +
+      stat_regline_equation(label.y = -0.5)+
+      ggtitle(label="true versus inverted lnT")
+  }
+  if(!is.null(trueK))
+    return(list(lnk=p1,varlnk=p2,lnkscatter=p3,headscatter=p4))
+  else
+    return(list(lnk=p1,varlnk=p2,headscatter=p4))
+}
