@@ -24,7 +24,7 @@ Plotsteady2d <- function(s, palette="viridis",plotshow = TRUE,
   require('ggplot2')
   p = ggplot(s, aes(x, y, fill = solution)) +
     geom_tile() +
-    scale_fill_viridis_c(option = palette)
+    scale_fill_viridis_c(option = palette)+
     labs(title = title, x = "X/m", y = "Y/m", fill = z)
 
 
@@ -32,10 +32,50 @@ Plotsteady2d <- function(s, palette="viridis",plotshow = TRUE,
   if(!is.null(plotfile)){
     ggsave(plotfile, width = plotwidth, height = plotheight)
   }
-  return(p)
+  if(plotshow) return(p)
 }
 
+#' Plot the generated T distribution from random2d.
+#' @return a plot showing contour.
+#' @param TT a data.frame, the result of Fsteady2dsim (x,y,transsimisivity).
+#' @param plotshow a logical value, if TRUE, the plot will be shown.
+#' @param plotfile a string, the path to save the plot.
+#' @param plotwidth a numeric value, the width of the plot.
+#' @param plotheight a numeric value, the height of the plot.
+#' @param iflog a logical value, if true,  use log(T), else using T.
+#' @param palette a string, the palette to use. could be magma, inferno, plasma, viridis, cividis, rocket, marko, turbo, or simply A-G.
+#' @export
+#' @examples
+#' TT= random2d()
+#' Plotparameter2d(TT,iflog=T)
+#' TT= random2d(geo=list(me=0,var=1,geomod="Exp",anis=c(90,0.2),range=30,nugget=0))
+#' Plotparameter2d(TT,iflog=T)
 
+Plotparameter2d <- function(TT, palette="viridis",plotshow = TRUE,
+                         plotfile = NULL, plotwidth = 10, plotheight = 10, iflog = FALSE) {
+
+  if (iflog) {
+    TT$Tp = log(TT$Tp)
+    title = "2D log-transformed Transimisivity"
+    z = "log(T) [L2/T]"
+  } else {
+    title = "2D Transimisivity"
+    z = "T [L2/T]"
+  }
+
+  require('ggplot2')
+  p = ggplot(TT, aes(x, y, fill = Tp)) +
+    geom_tile() +
+    scale_fill_viridis_c(option = palette)+
+    labs(title = title, x = "X/m", y = "Y/m", fill = z)
+
+
+
+  if(!is.null(plotfile)){
+    ggsave(plotfile, width = plotwidth, height = plotheight)
+  }
+  if(plotshow) return(p)
+}
 
 #' now we can choose the best iteration to plot.
 #' estimated K plot.
@@ -47,31 +87,35 @@ Plotsteady2d <- function(s, palette="viridis",plotshow = TRUE,
 #' set.seed(100)
 #' trueK <- random2d(nsim=1)
 #' TT <- trueK[,-c(1,2)]
-#' trueh <- Fsteady2dsim(TT=TT)
+#' domain=c(40,40,0,40,0,40)
+#' grid = GenGrid(domain)
+#' Qinf1=data.frame(Qp=10,xp=20.5,yp=20.5)
+#' qHT <- list(test1 = Qinf1)
+#' trueh <- Fsteady2dsim(TT=TT,Qinf=Qinf1,grid=grid)
 #' trueh <- trueh$solution
-#' n <- 1600
-#' nobs <- 25
 #' locx = c(15,18,22,25,30)
 #' locy = c(15,18,22,25,30)
 #' loc= expand.grid(x=locx,y=locy)
-#' loc_obs <- (loc$y-1)*40 + loc$x
-#' trueobsh <- trueh[loc_obs]
-#' loc_obs = list(loc_obs)
-#' trueobsh = list(trueobsh)
-#' result <- Finverse(loc_obs=loc_obs,trueobsh=trueobsh)
-#' inversePlot(niterm=5,iterdf = result,trueh = trueobsh,trueK=trueK)
-inversePlot <- function(niterm=1,iterdf,trueh,trueK=NULL){
+#' Oinf <- data.frame(data=NA,x=loc$x,y=loc$y)
+#' Oinf <- getOelem(grid = grid)
+#' Oinf$data <- trueh[Oinf$nelem]
+#' oHT <- list(test1 = Oinf)
+#' result <- Finverse(grid =grid, qHT = qHT, oHT = oHT)
+#' inversePlot(niterm=5,iterdf = result,oHT = oHT,trueK=trueK)
+inversePlot <- function(niterm=1,iterdf,oHT,trueK=NULL){
   # niterm = 5
   # note that trueh is actually a list contains many pumping tests.
-  np <- sapply(trueh,length) # get the number of observations for each test.
-  ntest <- rep("test1",np[1])
-  if(length(np)>=2){
-    for (i in 2:length(np)){
-      ntest <- append(ntest,rep(paste0("test",i),np[i]))
-    }
-  }
+  require(dplyr)
+  oHTdf = bind_rows(oHT,.id='id')
+  # np <- sapply(trueh,length) # get the number of observations for each test.
+  # ntest <- rep("test1",np[1])
+  # if(length(np)>=2){
+  #   for (i in 2:length(np)){
+  #     ntest <- append(ntest,rep(paste0("test",i),np[i]))
+  #   }
+  # }
 
-  trueh <- unlist(trueh) # unlist
+  trueh <- oHTdf$data # the observation data in a vector.
   df <- data.frame(x=trueK$x,y=trueK$y,v=iterdf[[niterm]]$meanT,var=iterdf[[niterm]]$varT)
   library(ggplot2)
   p1<- ggplot(df) +
@@ -85,7 +129,7 @@ inversePlot <- function(niterm=1,iterdf,trueh,trueK=NULL){
     scale_fill_viridis_c(option = "viridis", direction = 1)+
     ggtitle(label="estimated lnK variance")
 
-  dfh <- data.frame(trueh=trueh,simh=iterdf[[niterm]]$meanobsh,varh=iterdf[[niterm]]$varobsh,ntest=ntest)
+  dfh <- data.frame(trueh=trueh,simh=iterdf[[niterm]]$meanobsh,varh=iterdf[[niterm]]$varobsh,ntest=oHTdf$id)
   #https://www.roelpeters.be/how-to-add-a-regression-equation-and-r-squared-in-ggplot2/
   #https://rpkgs.datanovia.com/ggpubr/reference/stat_regline_equation.html
   require(ggpubr)

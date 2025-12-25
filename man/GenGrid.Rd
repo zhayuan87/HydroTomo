@@ -2,28 +2,20 @@
 % Please edit documentation in R/utilities.R
 \name{GenGrid}
 \alias{GenGrid}
-\title{generate forward running grid and output its grid and observation/source grid.
-input domain, pump and obs location}
+\title{generate forward running grid and output its grid and grid.
+input domain}
 \usage{
-GenGrid(
-  domain = c(40, 40, 0, 40, 0, 40),
-  pump = list(xp = 20.5, yp = 20.5),
-  obs = list(xo = 30, yo = 30)
-)
+GenGrid(domain = c(40, 40, 0, 40, 0, 40))
 }
 \arguments{
 \item{domain}{c(Nx,Ny,x1,x2,y1,y2) domain of the grid.}
-
-\item{pump}{c(xp,yp) pump location.}
-
-\item{obs}{c(xo,yo) observation location.}
 }
 \value{
-output grid, pump and obs element number
+output n, xmid, ymid, and grid
 }
 \description{
-generate forward running grid and output its grid and observation/source grid.
-input domain, pump and obs location
+generate forward running grid and output its grid and grid.
+input domain
 }
 \examples{
 grid <- GenGrid()

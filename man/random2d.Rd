@@ -26,16 +26,7 @@ Based on package gstat, it generate correlated random field using Gaussian simul
 }
 \examples{
 TT= random2d()
-library('ggplot2')
-ggplot(TT) +
-  aes(x = x, y = y, fill = Tp) +
-  geom_tile() +
-  scale_fill_viridis_c(option = "viridis", direction = 1,trans="log") +
-  theme_minimal()
+Plotparameter2d(TT,iflog=T)
  TT= random2d(geo=list(me=0,var=1,geomod="Exp",anis=c(90,0.2),range=30,nugget=0))
-ggplot(TT) +
-  aes(x = x, y = y, fill = Tp) +
-  geom_tile() +
-  scale_fill_viridis_c(option = "viridis", direction = 1,trans="log") +
-  theme_minimal()
+Plotparameter2d(TT,iflog=T)
 }

@@ -5,7 +5,7 @@
 \title{now we can choose the best iteration to plot.
 estimated K plot.}
 \usage{
-inversePlot(niterm = 1, iterdf, trueh, trueK = NULL)
+inversePlot(niterm = 1, iterdf, oHT, trueK = NULL)
 }
 \arguments{
 \item{iterdf}{the data.frame of iterations.}
@@ -22,17 +22,19 @@ estimated K plot.
 set.seed(100)
 trueK <- random2d(nsim=1)
 TT <- trueK[,-c(1,2)]
-trueh <- Fsteady2dsim(TT=TT)
+domain=c(40,40,0,40,0,40)
+grid = GenGrid(domain)
+Qinf1=data.frame(Qp=10,xp=20.5,yp=20.5)
+qHT <- list(test1 = Qinf1)
+trueh <- Fsteady2dsim(TT=TT,Qinf=Qinf1,grid=grid)
 trueh <- trueh$solution
-n <- 1600
-nobs <- 25
 locx = c(15,18,22,25,30)
 locy = c(15,18,22,25,30)
 loc= expand.grid(x=locx,y=locy)
-loc_obs <- (loc$y-1)*40 + loc$x
-trueobsh <- trueh[loc_obs]
-loc_obs = list(loc_obs)
-trueobsh = list(trueobsh)
-result <- Finverse(loc_obs=loc_obs,trueobsh=trueobsh)
-inversePlot(niterm=5,iterdf = result,trueh = trueobsh,trueK=trueK)
+Oinf <- data.frame(data=NA,x=loc$x,y=loc$y)
+Oinf <- getOelem(grid = grid)
+Oinf$data <- trueh[Oinf$nelem]
+oHT <- list(test1 = Oinf)
+result <- Finverse(grid =grid, qHT = qHT, oHT = oHT)
+inversePlot(niterm=5,iterdf = result,oHT = oHT,trueK=trueK)
 }
