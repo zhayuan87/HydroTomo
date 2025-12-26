@@ -8,7 +8,8 @@ Fsteady2dsim(
   domain = c(40, 40, 0, 40, 0, 40),
   grid = NULL,
   TT = 0.1,
-  Qinf = data.frame(Qp = 10, x = 20.5, y = 20.5)
+  Qinf = data.frame(Qp = 10, x = 20.5, y = 20.5),
+  lrw = 160000
 )
 }
 \arguments{
@@ -19,6 +20,8 @@ Fsteady2dsim(
 \item{TT}{a  n * 1 vector giving transimisivity (L2/T) at each grid point.}
 
 \item{Qinf}{a ldata.frame giving pumping rates (Qp) and locations (x,y).}
+
+\item{lrw}{integer, the length of the real work array, default 160000 (grid size).}
 }
 \value{
 A data frame of two elements with grid showing generated grid and

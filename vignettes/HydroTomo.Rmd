@@ -1,0 +1,104 @@
+---
+title: "HydroTomo"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{HydroTomo}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>",
+  fig.width=8,
+  fig.height=6
+)
+```
+
+# Background 
+
+This package is developed for doing Hydraulic Tomography (HT) inversion in R. The HT technique or philosophy is to conduct multiple pumping tests in a confined aquifer and use the drawdown data to estimate the heterogeneous hydraulic conductivity field. The package contains functions for generating random hydraulic conductivity fields, simulating steady-state groundwater flow under pumping test conditions, performing HT inversion using geostatistical approach, and visualizing the results. 
+
+The developer, Yuanyuan Zha, was a visiting scholar and postdoc at University of Arizona, supervised by Professor Jim Yeh, who is the origional developer of the HT method. The package is mainly based on the codes and algorithms developed during Yuanyuan's staying at Wuhan University.
+
+# Example of toy forward studies
+
+In the package, there is some default parameters in the function to make the simulation and inversion easier. Here is an example of simulating steady-state drawdown data for a pumping test in a confined aquifer with a default homogeneous transmissivity field.
+
+```{r toyforward}
+library('HydroTomo')
+s <- Fsteady2dsim()
+Plotsteady2d(s)
+Qinf = data.frame(Qp=c(10,10),x=c(10.5,30.5),y=c(20.5,20.5))
+s <- Fsteady2dsim(Qinf=Qinf)
+Plotsteady2d(s)
+```
+
+We also give example of simulating steady-state drawdown data with heterogeneous transmissivity field.
+
+```{r toyforward2}
+set.seed(100)
+TT <- random2d(nsim=1)$Tp
+Qinf = data.frame(Qp=c(10,10),x=c(10.5,30.5),y=c(20.5,20.5))
+s <- Fsteady2dsim(TT=TT,Qinf=Qinf)
+Plotsteady2d(s)
+```
+
+# Example of toy inverse studies
+
+Now we give a simple example of inverse method. Since it is very time comsuming to do a full inversion, here we just show how to run the function with small number of iterations and small ensemble size.
+
+```{r toyinverse,eval=T}
+set.seed(100)
+trueK <- random2d(nsim=1)
+TT <- trueK[,-c(1,2)]
+domain=c(40,40,0,40,0,40)
+grid = GenGrid(domain)
+Qinf1=data.frame(Qp=10,xp=20.5,yp=20.5)
+qHT <- list(test1 = Qinf1)
+trueh <- Fsteady2dsim(TT=TT,Qinf=Qinf1,domain=domain)
+locx = c(15,18,22,25,30)
+locy = c(15,18,22,25,30)
+loc= expand.grid(x=locx,y=locy)
+Oinf1 <- data.frame(data=NA,x=loc$x,y=loc$y)
+Oinf1 <- samData(grid = grid,Oinf = Oinf1,h=trueh$solution)
+oHT <- list(test1 = Oinf1)
+result <- Finverse(grid =grid, qHT = qHT, oHT = oHT)
+inversePlot(niterm=5,iterdf = result,oHT = oHT,trueK=trueK)
+```
+
+# Field studies
+
+Hydraulic tomography has been validated by many field studies. Now we give an example of using field data provided in the package to do forward simulation. The data was given by Xi'an Geological Surveying. The data contains 12 pumping tests conducted in an unconfined aquifer at Bulanghe River Basin near Yulin. The pumping test data and observation data are provided in the package as `qHT` and `oHT` datasets. Here we just show how to do forward simulation using the estimated transmissivity field provided in the package.
+
+
+```{r plot_blh}
+library(HydroTomo)
+data('qHT')
+
+domain=c(80,80,0,80,0,80)
+grid <- GenGrid(domain=domain)
+Qinf = qHT[[1]]
+s <- Fsteady2dsim(TT=50,Qinf=Qinf,grid=grid,lrw=320000)
+Plotsteady2d(s)
+```
+
+Now we can sample the data at observation locations and compare with observed data.
+
+```{r compare_blh}
+data('oHT')
+Oinf =oHT[[1]]
+Oinf2 = samData(Oinf=Oinf,grid=grid,h=s$solution)
+dfx = data.frame(obs = Oinf$data,sim=Oinf2$data)
+library(ggplot2)
+# make sure x, y are in the same range.
+datamin = min(c(dfx$obs,dfx$sim))
+datamax = max(c(dfx$obs,dfx$sim))
+p <- ggplot(dfx,aes(x=obs,y=sim))+
+  geom_point()+
+  geom_abline(slope=1,intercept=0,color='red')+
+  coord_cartesian(xlim = c(datamin, datamax), ylim = c(datamin, datamax))+
+  labs(title='Observed vs Simulated heads',x='Observed heads/m',y='Simulated heads/m')
+print(p)
+```

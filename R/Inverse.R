@@ -13,6 +13,7 @@
 #' @param rmsemin minimum rmse.
 #' @param mul stablizer.
 #' @param oHT list of observation information. list(data.frame(data,x,y))
+#' @param lrw integer, the length of the real work array, default 160000 (grid size).
 #' @return list of iteration data.
 #' @export
 #' @examples
@@ -24,21 +25,18 @@
 #' Qinf1=data.frame(Qp=10,xp=20.5,yp=20.5)
 #' qHT <- list(test1 = Qinf1)
 #' trueh <- Fsteady2dsim(TT=TT,Qinf=Qinf1,domain=domain)
-#' trueh <- trueh$solution
 #' locx = c(15,18,22,25,30)
 #' locy = c(15,18,22,25,30)
 #' loc= expand.grid(x=locx,y=locy)
 #' Oinf1 <- data.frame(data=NA,x=loc$x,y=loc$y)
-#' Oinf1 <- getOelem(grid = grid,Oinf = Oinf1)
-#' Oinf1$data <- trueh[Oinf$nelem]
+#' Oinf1 <- samData(grid = grid,Oinf = Oinf1,h=trueh$solution)
 #' oHT <- list(test1 = Oinf1)
 #' result <- Finverse(grid =grid, qHT = qHT, oHT = oHT)
 #' inversePlot(niterm=5,iterdf = result,oHT = oHT,trueK=trueK)
 #' Qinf2=data.frame(Qp=10,xp=10.5,yp=10.5)
 #' trueh2 <- Fsteady2dsim(TT=TT,Qinf=Qinf2,domain=domain)
-#' trueh2 <- trueh2$solution
 #' Oinf2 <- Oinf1
-#' Oinf2$data <- trueh2[Oinf2$nelem]
+#' Oinf2 <- samData(grid = grid,Oinf = Oinf2,h=trueh2$solution)
 #' oHT <- list(test1 = Oinf1,test2 = Oinf2)
 #' qHT <- list(test1 = Qinf1,test2 = Qinf2)
 #' result <- Finverse(grid =grid, qHT = qHT, oHT = oHT)
@@ -53,7 +51,8 @@ Finverse <- function(
     varmeanTmax =5,
     rmsemin = 0,
     mul=1.0,
-    oHT= list(data.frame(data=-1,x=11,y=11))) # should be list since multiple pumping test.
+    oHT= list(data.frame(data=-1,x=11,y=11)),
+    lrw=160000) # should be list since multiple pumping test.
 {
   set.seed(200)
   ### record the time so to see how long it takes.
@@ -111,7 +110,7 @@ Finverse <- function(
       Qinf <- qHT[[j]]
       # 使用 lapply 生成所有模拟结果
       h_list <- lapply(1:nsim, function(i){
-        tmp = Fsteady2dsim(grid = grid, TT = Tnew[, i], Qinf = Qinf)$solution
+        tmp = Fsteady2dsim(grid = grid, TT = Tnew[, i], Qinf = Qinf,lrw=lrw)$solution
         index = loc_obsHT[[j]]
         tmp[index]
       }

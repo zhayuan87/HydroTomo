@@ -25,6 +25,7 @@ Get the elemental number of the observation well.
 }
 \examples{
 grid <- GenGrid()
-Oinf <- getOelem(grid = grid)
+Oinf=data.frame(data=NA,x=30.5,y=30.5)
+Oinf <- getOelem(grid = grid, Oinf=Oinf)
 
 }

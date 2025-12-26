@@ -39,6 +39,8 @@ Finverse(
 \item{mul}{stablizer.}
 
 \item{oHT}{list of observation information. list(data.frame(data,x,y))}
+
+\item{lwr}{integer, the length of the real work array, default 160000 (grid size).}
 }
 \value{
 list of iteration data.
