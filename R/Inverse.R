@@ -72,7 +72,7 @@ Finverse <- function(
   trueobsh <- unlist(trueobshHT) # the data format in HT is a list.
   nobs <- length(trueobsh)
 
-  yy <- random2d(nsim=nsim,domain = domain)
+  yy <- random2d(nsim=nsim,grid = grid)
   # initial ensemble.
   Tnew <- yy[,-c(1,2)]
   # nelem*nsim

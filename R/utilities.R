@@ -15,17 +15,18 @@
 #' Plotparameter2d(TT,iflog=T)
 
 random2d <- function(domain=c(40,40,0,40,0,40),
+                     grid = NULL,
                      geo=list(me=0,var=1,geomod="Exp",anis=c(90,1),range=30,nugget=0),
                      nsim=1){
 
   require('gstat')
+  if(is.null(grid))grid = GenGrid(domain)
   # Nx <- domain[1]
   # Ny <- domain[2]
   # # input
   # x <- seq(domain[3],domain[4],length.out=Nx)
   # y <- seq(domain[5],domain[6],length.out=Ny)
   # xy <- expand.grid(x=x, y=y)
-  grid = GenGrid(domain)
   x = grid$xmid
   y = grid$ymid
   xy = grid$grid
