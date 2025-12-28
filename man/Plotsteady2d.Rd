@@ -11,7 +11,9 @@ Plotsteady2d(
   plotfile = NULL,
   plotwidth = 10,
   plotheight = 10,
-  ifdrawdown = TRUE
+  ifdrawdown = TRUE,
+  Qinf = NULL,
+  Oinf = NULL
 )
 }
 \arguments{
@@ -27,6 +29,10 @@ Plotsteady2d(
 
 \item{ifdrawdown}{a logical value, if true,  use drawdown, else using head change.}
 
+\item{Qinf}{The pumping test information in a data.frame (Qp,xp,yp).}
+
+\item{Oinf}{The observation information in a data.frame (data,x,y).}
+
 \item{steady2d}{a data.frame, the result of Fsteady2dsim (x,y,headchange).}
 }
 \value{
@@ -34,4 +40,9 @@ a plot showing contour.
 }
 \description{
 Plot the generated head distribution from Fsteady2dsim.
+}
+\examples{
+Qinf = data.frame(Qp=c(10,10),x=c(10.5,30.5),y=c(20.5,20.5))
+s <- Fsteady2dsim(Qinf=Qinf)
+Plotsteady2d(s,Qinf=Qinf,Oinf=data.frame(data=NA,x=c(15.5,25.5),y=c(20.5,20.5)))
 }

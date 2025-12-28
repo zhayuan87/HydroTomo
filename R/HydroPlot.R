@@ -7,10 +7,17 @@
 #' @param plotheight a numeric value, the height of the plot.
 #' @param ifdrawdown a logical value, if true,  use drawdown, else using head change.
 #' @param palette a string, the palette to use. could be magma, inferno, plasma, viridis, cividis, rocket, marko, turbo, or simply A-G.
+#' @param Qinf The pumping test information in a data.frame (Qp,xp,yp).
+#' @param Oinf The observation information in a data.frame (data,x,y).
 #' @export
+#' @examples
+#' Qinf = data.frame(Qp=c(10,10),x=c(10.5,30.5),y=c(20.5,20.5))
+#' s <- Fsteady2dsim(Qinf=Qinf)
+#' Plotsteady2d(s,Qinf=Qinf,Oinf=data.frame(data=NA,x=c(15.5,25.5),y=c(20.5,20.5)))
 
 Plotsteady2d <- function(s, palette="viridis",plotshow = TRUE,
-                         plotfile = NULL, plotwidth = 10, plotheight = 10, ifdrawdown = TRUE) {
+                         plotfile = NULL, plotwidth = 10, plotheight = 10, ifdrawdown = TRUE,
+                         Qinf = NULL, Oinf = NULL) {
 
   if (ifdrawdown) {
     s$solution = - s$solution
@@ -22,11 +29,18 @@ Plotsteady2d <- function(s, palette="viridis",plotshow = TRUE,
   }
 
   require('ggplot2')
-  p = ggplot(s, aes(x, y, fill = solution)) +
-    geom_tile() +
+  p = ggplot() +
+    geom_tile(data = s, aes(x, y, fill = solution)) +
     scale_fill_viridis_c(option = palette)+
     labs(title = title, x = "X/m", y = "Y/m", fill = z)
-
+# add the location of pumping well and observation well if Qinf and Oinf are given.
+  if(is.null(Qinf)==FALSE){
+    p = p + geom_point(data=Qinf,aes(x=x,y=y),color='red',fill="white",shape=21,size=4)+
+      geom_text(data=Qinf,aes(x=x,y=y,label=paste0("Q=",Qp)),color='red',vjust=-1)
+  }
+  if(is.null(Oinf)==FALSE){
+    p = p + geom_point(data=Oinf,aes(x=x,y=y),color='yellow',fill="white",shape=22,size=3)
+  }
 
 
   if(!is.null(plotfile)){

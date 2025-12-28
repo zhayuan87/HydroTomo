@@ -6,6 +6,7 @@
 \usage{
 random2d(
   domain = c(40, 40, 0, 40, 0, 40),
+  grid = NULL,
   geo = list(me = 0, var = 1, geomod = "Exp", anis = c(90, 1), range = 30, nugget = 0),
   nsim = 1
 )
