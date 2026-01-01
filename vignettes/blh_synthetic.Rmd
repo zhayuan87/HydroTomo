@@ -24,6 +24,15 @@ First we load the package.
 library(HydroTomo)
 ```
 
+First we want to know that the mean value of the oHT (but notice it could be smaller than usual since it may not stable).
+
+```{r calculate the mean of oHT}
+data("oHT")
+dfoHT = do.call(rbind,oHT)
+mean_oHT = mean(dfoHT$data)
+print(paste("The mean value of oHT is ", round(mean_oHT,4)))
+```
+
 Then we set the random seed for reproducibility and generate a true transmissivity field.
 
 ```{r generate_trueK}
@@ -31,7 +40,9 @@ set.seed(200)
 data('qHT')
 domain=c(80,80,0,80,0,80)
 grid <- GenGrid(domain=domain)
-trueK <- random2d(nsim=1,grid=grid)
+# exp(3.5)=33.12 m2/d means very large T values in sand and gravel aquifer.
+geo = list(me = 3.5, var = 1, geomod = "Exp", anis = c(90, 1), range = 40, nugget = 0)
+trueK <- random2d(nsim=1,grid=grid,geo = geo)
 plot1 <- Plotparameter2d(trueK,iflog=TRUE)
 print(plot1)
 ```
@@ -53,6 +64,10 @@ for (i in 1:length(oHT1)){
   oinf = samData(grid = grid,Oinf = oinf,h=trueh)
   oHT1[[i]] <- oinf[,c('data','x','y')]
 }
+
+dfoHT1 = do.call(rbind,oHT1)
+mean_oHT1 = mean(dfoHT1$data)
+print(paste("The mean value of oHT1 is ", round(mean_oHT1,4)))
 ```
 
 
@@ -75,7 +90,7 @@ result <- Finverse(grid =grid, qHT = qHT1, oHT = oHT1, nsim=50, itermax=10, lrw=
 # Plotting inversion results
 
 ```{r plot_inversion_results}
-inversePlot(niterm=10,grid=grid,iterdf = result,oHT = oHT1,trueK=trueK)
+inversePlot(niterm=7,grid=grid,iterdf = result,oHT = oHT1,trueK=trueK)
 ```
 
 # noised data
@@ -90,7 +105,7 @@ for (i in 1:length(oHT_noised)){
   oHT_noised[[i]]$data <- oHT_noised[[i]]$data + noise
 }
 result_noised <- Finverse(grid =grid, qHT = qHT1, oHT = oHT_noised, nsim=50, itermax=10, lrw=320000)
-inversePlot(niterm=10,grid=grid,iterdf = result_noised,oHT = oHT_noised,trueK=trueK)
+inversePlot(niterm=7,grid=grid,iterdf = result_noised,oHT = oHT_noised,trueK=trueK)
 ```
 
 Now we increase the sd of the noise to see how it affects the inversion results.

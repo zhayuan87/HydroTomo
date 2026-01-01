@@ -1,0 +1,172 @@
+---
+title: "hydraulic tomography incremental paper"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{hydraulic tomography incremental paper}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>"
+)
+```
+
+This is to create the paper data and figures.
+
+```{r setup}
+library(HydroTomo)
+```
+
+# Fig. 1
+
+This figure draw the synthetic case of hydraulic tomography. In figure a, we generate a random field, and gives the 6 pumping well locations. In figure b, we show the simulated drawdown data for test A-1 and also the location of observation wells in test A-1.
+
+```{r figure1}
+set.seed(2025)
+data('qHT')
+library(dplyr)
+qHTdf = dplyr::bind_rows(qHT,.id='id')
+qHTdf = qHTdf %>% dplyr::filter(id %in% c('A1-1','A2-1','A3-1','A4-1','A5-1','A6-1'))
+
+domain=c(80,80,0,80,0,80)
+grid <- GenGrid(domain=domain)
+# exp(3.5)=33.12 m2/d means very large T values in sand and gravel aquifer.
+geo = list(me = 3.2, var = 1, geomod = "Exp", anis = c(90, 1), range = 40, nugget = 0)
+trueK <- random2d(nsim=1,grid=grid,geo = geo)
+trueK$Tp = log(trueK$Tp)
+# make sure chinese font show correctly
+library(ggplot2)
+library(showtext)
+showtext_auto()
+  p1 = ggplot() +
+    geom_tile(data = trueK, aes(x, y, fill = Tp)) +
+    scale_fill_viridis_c(option = "D")+
+    geom_point(data = qHTdf, aes(x = x, y = y), color = "white", size = 3, shape=17)+
+   geom_text(data = qHTdf, aes(x = x, y = y, label = id), vjust = -1, color = "black")+
+    labs(title = "(a) 参考lnT及抽水井", x = "X/m", y = "Y/m", fill = "log(T)")+
+    theme_minimal()
+  p1
+```
+
+```{r figure1b}
+# simulate drawdown data for test A1-1
+TT <- exp(trueK$Tp)
+Qinf = qHT[['A1-1']]
+data('oHT')
+library(dplyr)
+oHTdf = dplyr::bind_rows(oHT,.id='id')
+oHTdf = oHTdf %>% dplyr::filter(id %in% c('A1-1'))
+s = Fsteady2dsim(TT=TT,Qinf=Qinf,grid=grid,lrw=320000)
+
+  p2 = ggplot() +
+    geom_tile(data = s, aes(x, y, fill = -solution)) +
+    scale_fill_viridis_c(option = "D")+
+    geom_point(data = oHTdf, aes(x = x, y = y), color = "red",fill="white", size = 3, shape=21)+
+    labs(title = "(b) 模拟降深及观测井", x = "X/m", y = "Y/m", fill = "降深/m")+
+    theme_minimal()
+  p2
+```  
+Now we use ggarrange to make the p1 p2 together.
+
+```{r figure1c, fig.width=10, fig.height=5}
+library(ggpubr)
+
+p = ggarrange(p1, p2, ncol = 2, nrow = 1)
+
+p
+```
+
+# Generating synthetic data
+
+We then simulate steady-state drawdown data for a pumping test using the true transmissivity field.
+
+```{r generate_synthetic_data, eval=FALSE}
+# TT <- 
+qHT1 = qHT[c(1,3,5,7,9,11)]
+oHT1 = oHT[c(1,3,5,7,9,11)]
+### loop over the list to update the value in oHT1.
+
+for (i in 1:length(oHT1)){
+  Qinf <- qHT1[[i]]
+  trueh <- Fsteady2dsim(TT=TT,Qinf=Qinf,grid=grid,lrw=320000)$solution
+  oinf <- oHT1[[i]]
+  oinf = samData(grid = grid,Oinf = oinf,h=trueh)
+  oHT1[[i]] <- oinf[,c('data','x','y')]
+}
+
+dfoHT1 = do.call(rbind,oHT1)
+mean_oHT1 = mean(dfoHT1$data)
+print(paste("The mean value of oHT1 is ", round(mean_oHT1,4)))
+```
+
+save the best synthetic data.
+
+```{r save_data, eval=FALSE}
+blh_syn_best_truth <- list(trueK=trueK, qHT=qHT1, oHT=oHT1, grid=grid)
+usethis::use_data(blh_syn_best_truth, overwrite = TRUE)
+```
+Now we use "blh_synthetic" data to do a sequence of inversion and save the result.
+
+```{r perform_inversion, cache=TRUE, eval=FALSE}
+data('blh_synthetic')
+grid = blh_synthetic$grid
+lire = list()
+# we select qHT1 and oHT1 from blh_synthetic, first test1, then 1,2, then 1,2,3
+for(i in 1:6){
+  qHT1 = blh_synthetic$qHT[1:i]
+  oHT1 = blh_synthetic$oHT[1:i]
+  result <- Finverse(grid =grid, qHT = qHT1, oHT = oHT1, nsim=50, itermax=10, lrw=320000,
+                     geo = list(me = 3.5, var = 1, geomod = "Exp", anis = c(90, 1), range = 40, nugget = 0))
+  lire[[i]] = result
+}
+### save the result
+saveRDS(lire, file = "lire_blh_synthetic_no-obs-error.rds")
+```
+
+# Plotting inversion results
+
+```{r plot_inversion_results, eval=FALSE}
+data('blh_synthetic')
+grid = blh_synthetic$grid
+trueK = blh_synthetic$trueK
+lire = readRDS(file = "E:/HydroTomo/lire_blh_synthetic_no-obs-error.rds")
+p1k = list()
+p2k = list()
+p3k = list()
+p4k = list()
+i1 = paste0("(",letters[1:6],") " ,1:6,"次抽水试验")
+for(i in 1:6){
+  niterm = length(lire[[i]])
+  oHT1 = blh_synthetic$oHT[1:i]
+  tmp = inversePlot(niterm=niterm,grid=grid,iterdf = lire[[i]],oHT = oHT1,trueK=trueK,
+                    p1title = i1[i],
+                    p1z = "ln(T) [L2/T]",
+                    p1xlab = "X/m",
+                    p1ylab = "Y/m",
+                    p2title = i1[i],
+                    p2z = "Var[ln(T)] [L2/T]",
+                    p2xlab = "X/m",
+                    p2ylab = "Y/m",
+                    p3title = i1[i],
+                    p3xlab = "模拟降深/m",
+                    p3ylab = "观测降深/m",
+                    p4title = i1[i],
+                    p4xlab = "参考lnT",
+                    p4ylab = "估计lnT")
+  p1k[[i]] = tmp$lnk
+  p2k[[i]] = tmp$varlnk
+  p3k[[i]] = tmp$headscatter
+  p4k[[i]] = tmp$lnkscatter
+}
+p1 = ggpubr::ggarrange(plotlist = p1k, ncol = 3, nrow = 2)
+p1
+p2 = ggpubr::ggarrange(plotlist = p2k, ncol = 3, nrow = 2)
+p2
+p3 = ggpubr::ggarrange(plotlist = p3k, ncol = 3, nrow = 2)
+p3
+p4 = ggpubr::ggarrange(plotlist = p4k, ncol = 3, nrow = 2)
+p4
+```

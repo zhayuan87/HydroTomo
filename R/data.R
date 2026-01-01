@@ -52,3 +52,13 @@
 #'   \item{grid}{the grid information used in the synthetic data generation.}
 #'   }
 "blh_synthetic"
+
+#' The best truth data generated using the same blh pumping and observation wells.
+#' @format A list of oHT1, qHT1, trueK, and grid.
+#' \describe{
+#'   \item{trueK}{data frame of true transmissivity field used in the synthetic data generation.}
+#'   \item{qHT1}{list of 6 pumping tests data frames used in the synthetic data generation.}
+#'   \item{oHT1}{list of 6 observation data frames used in the synthetic data generation.}
+#'   \item{grid}{the grid information used in the synthetic data generation.}
+#'   }
+"blh_syn_best_truth"

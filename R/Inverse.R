@@ -14,6 +14,7 @@
 #' @param mul stablizer.
 #' @param oHT list of observation information. list(data.frame(data,x,y))
 #' @param lrw integer, the length of the real work array, default 160000 (grid size).
+#' @param geo prior information for lnT, geostatistical features: list(mean,variance,covarirance_function,anisotropy,range,nugget)
 #' @return list of iteration data.
 #' @export
 #' @examples
@@ -32,7 +33,7 @@
 #' Oinf1 <- samData(grid = grid,Oinf = Oinf1,h=trueh$solution)
 #' oHT <- list(test1 = Oinf1)
 #' result <- Finverse(grid =grid, qHT = qHT, oHT = oHT)
-#' inversePlot(niterm=5,iterdf = result,oHT = oHT,trueK=trueK)
+#' inversePlot(niterm=5,iterdf = result,oHT = oHT,trueK=trueK,grid=grid)
 #' Qinf2=data.frame(Qp=10,xp=10.5,yp=10.5)
 #' trueh2 <- Fsteady2dsim(TT=TT,Qinf=Qinf2,domain=domain)
 #' Oinf2 <- Oinf1
@@ -40,7 +41,7 @@
 #' oHT <- list(test1 = Oinf1,test2 = Oinf2)
 #' qHT <- list(test1 = Qinf1,test2 = Qinf2)
 #' result <- Finverse(grid =grid, qHT = qHT, oHT = oHT)
-#' inversePlot(niterm=5,iterdf = result,oHT = oHT,trueK=trueK)
+#' inversePlot(niterm=5,iterdf = result,oHT = oHT,trueK=trueK,grid=grid)
 
 Finverse <- function(
     domain=c(40,40,0,40,0,40),
@@ -52,7 +53,8 @@ Finverse <- function(
     rmsemin = 0,
     mul=1.0,
     oHT= list(data.frame(data=-1,x=11,y=11)),
-    lrw=160000) # should be list since multiple pumping test.
+    lrw=160000,
+    geo=list(me=0,var=1,geomod="Exp",anis=c(90,1),range=30,nugget=0)) # should be list since multiple pumping test.
 {
   set.seed(200)
   ### record the time so to see how long it takes.
@@ -72,7 +74,7 @@ Finverse <- function(
   trueobsh <- unlist(trueobshHT) # the data format in HT is a list.
   nobs <- length(trueobsh)
 
-  yy <- random2d(nsim=nsim,grid = grid)
+  yy <- random2d(nsim=nsim,grid = grid, geo = geo)
   # initial ensemble.
   Tnew <- yy[,-c(1,2)]
   # nelem*nsim
