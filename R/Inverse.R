@@ -11,7 +11,8 @@
 #' @param itermax maximum number of iterations.
 #' @param varmeanTmax maximum variance of mean T.
 #' @param rmsemin minimum rmse.
-#' @param mul stablizer.
+#' @param mul stablizer default 1.
+#' @param decay decay of stablizer,default 1.05.
 #' @param oHT list of observation information. list(data.frame(data,x,y))
 #' @param lrw integer, the length of the real work array, default 160000 (grid size).
 #' @param geo prior information for lnT, geostatistical features: list(mean,variance,covarirance_function,anisotropy,range,nugget)
@@ -52,10 +53,12 @@ Finverse <- function(
     varmeanTmax =5,
     rmsemin = 0,
     mul=1.0,
+    decay = 1.05,
     oHT= list(data.frame(data=-1,x=11,y=11)),
     lrw=160000,
     geo=list(me=0,var=1,geomod="Exp",anis=c(90,1),range=30,nugget=0)) # should be list since multiple pumping test.
 {
+  #1. ----- before iteration (generating ensemble.....)----------
   set.seed(200)
   ### record the time so to see how long it takes.
   startTime <- Sys.time()
@@ -89,10 +92,11 @@ Finverse <- function(
   #mul <- 1.0 # stablizer.
   msgdf <- data.frame(niter = niter,varmeanT=varmeanT, rmse=rmse)
   iterdf <- list()
-
+  #1. ----- before iteration----------0.94 0.00 0.94 (blh_synthetic)
   # start of the itertion loop.
   while(niter<=itermax & varmeanT<varmeanTmax & rmse>rmsemin){
-    varT <- apply(log(Tnew),1,var)
+  #2. -----------get the obsh......------
+     varT <- apply(log(Tnew),1,var)
     meanT <- apply(log(Tnew),1,mean)
     varmeanT = var(meanT)
     # from Tnew to h.
@@ -125,8 +129,10 @@ Finverse <- function(
 
     # obsh: nsim*nobs
     if(nHT>1) obsh <- do.call("cbind",hHT) else obsh <- hHT[[1]]
+  #2. -----------get the obsh......------10.51  0.41 10.97
 
     # get the head variance for each observation.
+  #3. ----------- get the covh and covhk..............
     varobsh <- apply(obsh,2,var)
     meanobsh <- apply(obsh,2,mean)
     # get the misfit.
@@ -143,8 +149,10 @@ Finverse <- function(
       covhk = cov(obsh,TT)
     }
     covhk = suppressWarnings(multiApply::Apply(data,target_dims = list(1,1),cc))
+    #3. ----------- get the covh and covhk.............. blh 37.38  0.05 37.46
 
     # add stablizer term.
+    #4. ----------- solve covh ..............
     covh1 <- covh
     #diag(covh1) <-  (1+mul)*diag(covh)
     diag(covh1) <-  rep((1+mul)*max(diag(covh)),nobs)
@@ -163,9 +171,16 @@ Finverse <- function(
                  "l2=",round(l2,4),
                  "l1=",round(l1,4))
     msgdf <- rbind(msgdf,c(niter,varmeanT,rmse))
+    #4. ----------- solve covh ..............0.42 0.07 0.49
     print(msg)
     ### we need to store the iteration data.
     iterdf[[niter]] <- list(meanT = as.vector(meanT), varT = as.vector(varT), meanobsh = meanobsh, varobsh = varobsh)
+    if(niter == 1){
+      et = Sys.time()
+      print(" -------------------The Computational time for one iteration--------- ")
+      difftime(et,startTime),2)
+      print(" -------------------The Computational time for one iteration--------- ")
+    }
     niter <- niter + 1
     mul <- mul/1.05
 
@@ -173,6 +188,8 @@ Finverse <- function(
   }
   endTime <- Sys.time()
   # get the time in seconds or mins.
-  print(paste("The computational time takes ", round(endTime-startTime,digits=2),"seconds."))
+  print("-------------------The Computational--------- ")
+  difftime(endTime,startTime),2)
+  print("-------------------The Computational--------- ")
   return(iterdf)
 }

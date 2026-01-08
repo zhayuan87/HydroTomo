@@ -128,7 +128,7 @@ saveRDS(lire, file = "lire_blh_synthetic_no-obs-error.rds")
 
 # Plotting inversion results
 
-```{r plot_inversion_results, eval=FALSE}
+```{r plot_inversion_results, eval=TRUE}
 data('blh_synthetic')
 grid = blh_synthetic$grid
 trueK = blh_synthetic$trueK
@@ -169,4 +169,1188 @@ p3 = ggpubr::ggarrange(plotlist = p3k, ncol = 3, nrow = 2)
 p3
 p4 = ggpubr::ggarrange(plotlist = p4k, ncol = 3, nrow = 2)
 p4
+```
+
+# noised data
+
+The head match perfectly, but in reality the head data often contains noise. We can add noise to the synthetic data and perform inversion again.
+
+```{r add_noise_and_invert, cache=TRUE, eval=FALSE}
+set.seed(300)
+data('blh_synthetic')
+grid = blh_synthetic$grid
+trueK = blh_synthetic$trueK
+qHT1 = blh_synthetic$qHT
+oHT1 = blh_synthetic$oHT
+oHT_noised <- oHT1
+for (i in 1:length(oHT_noised)){
+  noise = rnorm(n=nrow(oHT_noised[[i]]), mean=0, sd=0.05*sd(oHT_noised[[i]]$data))
+  oHT_noised[[i]]$data <- oHT_noised[[i]]$data + noise
+}
+
+lire = list()
+# we select qHT1 and oHT1 from blh_synthetic, first test1, then 1,2, then 1,2,3
+for(i in 1:6){
+  qHT1 = blh_synthetic$qHT[1:i]
+  oHT1 = oHT_noised[1:i]
+  result <- Finverse(grid =grid, qHT = qHT1, oHT = oHT1, nsim=50, itermax=10, lrw=320000,
+                     geo = list(me = 3.5, var = 1, geomod = "Exp", anis = c(90, 1), range = 40, nugget = 0))
+  lire[[i]] = result
+}
+### save the result
+saveRDS(lire, file = "result_blh_synthetic_with-obs-error-sd0_05.rds")
+```
+
+
+
+```{r increase_noise_and_invert, cache=TRUE, eval=FALSE}
+set.seed(400)
+data('blh_synthetic')
+grid = blh_synthetic$grid
+trueK = blh_synthetic$trueK
+qHT1 = blh_synthetic$qHT
+oHT1 = blh_synthetic$oHT
+oHT_noised2 <- oHT1
+for (i in 1:length(oHT_noised2)){
+  noise = rnorm(n=nrow(oHT_noised2[[i]]), mean=0, sd=0.2*sd(oHT_noised2[[i]]$data))
+  oHT_noised2[[i]]$data <- oHT_noised2[[i]]$data + noise
+}
+lire = list()
+# we select qHT1 and oHT1 from blh_synthetic, first test1, then 1,2, then 1,2,3
+for(i in 1:6){
+  qHT1 = blh_synthetic$qHT[1:i]
+  oHT1 = oHT_noised2[1:i]
+  result <- Finverse(grid =grid, qHT = qHT1, oHT = oHT1, nsim=50, itermax=10, lrw=320000,
+                     geo = list(me = 3.5, var = 1, geomod = "Exp", anis = c(90, 1), range = 40, nugget = 0))
+  lire[[i]] = result
+}
+### save the result
+saveRDS(lire, file = "result_blh_synthetic_with-obs-error-sd0_2.rds")
+```
+
+# plot noised data inversion results
+
+```{r plot_noised_inversion_results, eval=FALSE}
+data('blh_synthetic')
+grid = blh_synthetic$grid
+trueK = blh_synthetic$trueK
+lire = readRDS(file = "E:/HydroTomo/result_blh_synthetic_with-obs-error-sd0_05.rds")
+p1k = list()
+p2k = list()
+p3k = list()
+p4k = list()
+i1 = paste0("(",letters[1:6],") " ,1:6,"次抽水试验，观测数据含5%噪声")
+for(i in 1:6){
+  niterm = length(lire[[i]])
+  oHT1 = blh_synthetic$oHT[1:i]
+  tmp = inversePlot(niterm=niterm,grid=grid,iterdf = lire[[i]],oHT = oHT1,trueK=trueK,
+                    p1title = i1[i],
+                    p1z = "ln(T) [L2/T]",
+                    p1xlab = "X/m",
+                    p1ylab = "Y/m",
+                    p2title = i1[i],
+                    p2z = "Var[ln(T)] [L2/T]",
+                    p2xlab = "X/m",
+                    p2ylab = "Y/m",
+                    p3title = i1[i],
+                    p3xlab = "模拟降深/m",
+                    p3ylab = "观测降深/m",
+                    p4title = i1[i],
+                    p4xlab = "参考lnT",
+                    p4ylab = "估计lnT")
+  p1k[[i]] = tmp$lnk
+  p2k[[i]] = tmp$varlnk 
+  p3k[[i]] = tmp$headscatter
+  p4k[[i]] = tmp$lnkscatter
+}
+p1 = ggpubr::ggarrange(plotlist = p1k, ncol = 3, nrow = 2)
+p1
+p2 = ggpubr::ggarrange(plotlist = p2k, ncol = 3, nrow = 2)
+p2
+p3 = ggpubr::ggarrange(plotlist = p3k, ncol = 3, nrow = 2)
+p3
+p4 = ggpubr::ggarrange(plotlist = p4k, ncol = 3, nrow = 2)
+p4
+```
+
+# more noise inversion results
+```{r plot_more_noised_inversion_results, eval=FALSE}
+data('blh_synthetic')
+grid = blh_synthetic$grid
+trueK = blh_synthetic$trueK
+lire = readRDS(file = "E:/HydroTomo/result_blh_synthetic_with-obs-error-sd0_2.rds")
+p1k = list()
+p2k = list()
+p3k = list()
+p4k = list()
+i1 = paste0("(",letters[1:6],") " ,1:6,"次抽水试验，观测数据含20%噪声")
+for(i in 1:6){
+  niterm = length(lire[[i]])
+  oHT1 = blh_synthetic$oHT[1:i]
+  tmp = inversePlot(niterm=niterm,grid=grid,iterdf = lire[[i]],oHT = oHT1,trueK=trueK,
+                    p1title = i1[i],
+                    p1z = "ln(T) [L2/T]",
+                    p1xlab = "X/m",
+                    p1ylab = "Y/m",
+                    p2title = i1[i],
+                    p2z = "Var[ln(T)] [L2/T]",
+                    p2xlab = "X/m",
+                    p2ylab = "Y/m",
+                    p3title = i1[i],
+                    p3xlab = "模拟降深/m",
+                    p3ylab = "观测降深/m",
+                    p4title = i1[i],
+                    p4xlab = "参考lnT",
+                    p4ylab = "估计lnT")
+  p1k[[i]] = tmp$lnk
+  p2k[[i]] = tmp$varlnk
+  p3k[[i]] = tmp$headscatter
+  p4k[[i]] = tmp$lnkscatter
+}
+p1 = ggpubr::ggarrange(plotlist = p1k, ncol = 3, nrow = 2)
+p1
+p2 = ggpubr::ggarrange(plotlist = p2k, ncol = 3, nrow = 2)
+p2
+p3 = ggpubr::ggarrange(plotlist = p3k, ncol = 3, nrow = 2)
+p3
+p4 = ggpubr::ggarrange(plotlist = p4k, ncol = 3, nrow = 2)
+p4
+```
+
+Now we investigate the influence of prior information on inversion results. This time we focuse on 0.05 noise, 1:3 test. But we change prior information, i.e., geo, we give false information, like mean value too high or low, variance too high or low, range too high or low.
+
+```{r prior_info_influence, cache=TRUE, eval=FALSE}
+set.seed(300)
+data('blh_synthetic')
+grid = blh_synthetic$grid
+trueK = blh_synthetic$trueK
+qHT1 = blh_synthetic$qHT[1:3]
+oHT1 = blh_synthetic$oHT[1:3]
+oHT_noised <- oHT1
+for (i in 1:length(oHT_noised)){
+  noise = rnorm(n=nrow(oHT_noised[[i]]), mean=0, sd=0.05*sd(oHT_noised[[i]]$data))
+  oHT_noised[[i]]$data <- oHT_noised[[i]]$data + noise
+}
+lire = list()
+geo_list = list(
+  list(me = 2.5, var = 1, geomod = "Exp", anis = c(90, 1), range = 40, nugget = 0), # low mean
+  list(me = 4.5, var = 1, geomod = "Exp", anis = c(90, 1), range = 40, nugget = 0), # high mean
+  list(me = 3.5, var = 0.5, geomod = "Exp", anis = c(90, 1), range = 40, nugget = 0), # low var
+  list(me = 3.5, var = 2, geomod = "Exp", anis = c(90, 1), range = 40, nugget = 0), # high var
+  list(me = 3.5, var = 1, geomod = "Exp", anis = c(90, 1), range = 20, nugget = 0), # low range
+  list(me = 3.5, var = 1, geomod = "Exp", anis = c(90, 1), range = 80, nugget = 0)  # high range
+)
+for(i in 1:length(geo_list)){
+  geo = geo_list[[i]]
+  result <- Finverse(grid =grid, qHT = qHT1, oHT = oHT_noised, nsim=50, itermax=10, lrw=320000,
+                     geo = geo)
+  lire[[i]] = result
+}
+### save the result
+saveRDS(lire, file = "E:/HydroTomo/result_blh_synthetic_with-obs-error-sd0_05_prior-info-test1-3.rds")
+```
+
+
+now plot the prior information influence results.
+
+```{r plot_prior_info_influence, eval=FALSE}
+data('blh_synthetic')
+grid = blh_synthetic$grid
+trueK = blh_synthetic$trueK
+lire = readRDS(file = "E:/HydroTomo/result_blh_synthetic_with-obs-error-sd0_05_prior-info-test1-3.rds")
+p1k = list()
+p2k = list()
+p3k = list()
+p4k = list()
+i1 = c("(a) 低均值先验信息",
+        "(b) 高均值先验信息",
+        "(c) 低方差先验信息",
+        "(d) 高方差先验信息",
+        "(e) 低相关长度先验信息",
+        "(f) 高相关长度先验信息")
+for(i in 1:6){
+  niterm = length(lire[[i]])
+  oHT1 = blh_synthetic$oHT[1:3]
+  tmp = inversePlot(niterm=niterm,grid=grid,iterdf = lire[[i]],oHT = oHT1,trueK=trueK,
+                    p1title = i1[i],
+                    p1z = "ln(T) [L2/T]",
+                    p1xlab = "X/m",
+                    p1ylab = "Y/m",
+                    p2title = i1[i],
+                    p2z = "Var[ln(T)] [L2/T]",
+                    p2xlab = "X/m",
+                    p2ylab = "Y/m",
+                    p3title = i1[i],
+                    p3xlab = "模拟降深/m",
+                    p3ylab = "观测降深/m",
+                    p4title = i1[i],
+                    p4xlab = "参考lnT",
+                    p4ylab = "估计lnT")
+  p1k[[i]] = tmp$lnk
+  p2k[[i]] = tmp$varlnk
+  p3k[[i]] = tmp$headscatter
+  p4k[[i]] = tmp$lnkscatter
+}
+p1 = ggpubr::ggarrange(plotlist = p1k, ncol = 3, nrow = 2)
+p1
+p2 = ggpubr::ggarrange(plotlist = p2k, ncol = 3, nrow = 2)
+p2
+p3 = ggpubr::ggarrange(plotlist = p3k, ncol = 3, nrow = 2)
+p3
+p4 = ggpubr::ggarrange(plotlist = p4k, ncol = 3, nrow = 2)
+p4
+```
+
+
+It seems there is little influence of prior information on inversion results when 3 tests and 5% noise are given. Now we use only one test to see how prior information affects inversion results.
+
+```{r prior_info_influence_one_test, cache=TRUE, eval=FALSE}
+set.seed(300)
+data('blh_synthetic')
+grid = blh_synthetic$grid
+trueK = blh_synthetic$trueK
+qHT1 = blh_synthetic$qHT[1]
+oHT1 = blh_synthetic$oHT[1]
+oHT_noised <- oHT1
+for (i in 1:length(oHT_noised)){
+  noise = rnorm(n=nrow(oHT_noised[[i]]), mean=0, sd=0.05*sd(oHT_noised[[i]]$data))
+  oHT_noised[[i]]$data <- oHT_noised[[i]]$data + noise
+}
+lire = list()
+geo_list = list(
+  list(me = 2.5, var = 1, geomod = "Exp", anis = c(90, 1), range = 40, nugget = 0), # low mean
+  list(me = 4.5, var = 1, geomod = "Exp", anis = c(90, 1), range = 40, nugget = 0), # high mean
+  list(me = 3.5, var = 0.5, geomod = "Exp", anis = c(90, 1),  range = 40, nugget = 0), # low var
+  list(me = 3.5, var = 2, geomod = "Exp", anis = c(90, 1), range = 40, nugget = 0), # high var
+  list(me = 3.5, var = 1, geomod = "Exp", anis = c(90, 1), range = 20, nugget = 0), # low range
+  list(me = 3.5, var = 1, geomod = "Exp", anis = c(90, 1), range = 80, nugget = 0)  # high range
+)
+for(i in 1:length(geo_list)){
+  geo = geo_list[[i]]
+  result <- Finverse(grid =grid, qHT = qHT1, oHT = oHT_noised, nsim=50, itermax=10, lrw=320000,
+                     geo = geo)
+  lire[[i]] = result
+}
+### save the result
+saveRDS(lire, file = "E:/HydroTomo/result_blh_synthetic_with-obs-error-sd0_05_prior-info-test1.rds")
+```
+
+```{r plot_prior_info_influence_one_test, eval=FALSE}
+data('blh_synthetic')
+grid = blh_synthetic$grid
+trueK = blh_synthetic$trueK
+lire = readRDS(file = "E:/HydroTomo/result_blh_synthetic_with-obs-error-sd0_05_prior-info-test1.rds")
+p1k = list()
+p2k = list()
+p3k = list()
+p4k = list()
+i1 = c("(a) 低均值先验信息",
+        "(b) 高均值先验信息",
+        "(c) 低方差先验信息",
+        "(d) 高方差先验信息",
+        "(e) 低相关长度先验信息",
+        "(f) 高相关长度先验信息")
+for(i in 1:6){
+  niterm = length(lire[[i]])
+  oHT1 = blh_synthetic$oHT[1]
+  tmp = inversePlot(niterm=niterm,grid=grid,iterdf = lire[[i]],oHT = oHT1,trueK=trueK,
+                    p1title = i1[i],
+                    p1z = "ln(T) [L2/T]",
+                    p1xlab = "X/m",
+                    p1ylab = "Y/m",
+                    p2title = i1[i],
+                    p2z = "Var[ln(T)] [L2/T]",
+                    p2xlab = "X/m",
+                    p2ylab = "Y/m",
+                    p3title = i1[i],
+                    p3xlab = "模拟降深/m",
+                    p3ylab = "观测降深/m",
+                    p4title = i1[i],
+                    p4xlab = "参考lnT",
+                    p4ylab = "估计lnT")
+  p1k[[i]] = tmp$lnk
+  p2k[[i]] = tmp$varlnk
+  p3k[[i]] = tmp$headscatter
+  p4k[[i]] = tmp$lnkscatter
+}
+p1 = ggpubr::ggarrange(plotlist = p1k, ncol = 3, nrow = 2)
+p1
+p2 = ggpubr::ggarrange(plotlist = p2k, ncol = 3, nrow = 2)
+p2
+p3 = ggpubr::ggarrange(plotlist = p3k, ncol = 3, nrow = 2)
+p3
+p4 = ggpubr::ggarrange(plotlist = p4k, ncol = 3, nrow = 2)
+p4
+```
+
+Now we give more details on different prior mean. from me =0.5 to me=5.5, step=1.
+
+```{r detailed_prior_mean_influence, cache=TRUE, eval=FALSE}
+set.seed(300)
+lire = list()
+geo_list = list(
+  list(me = 0.5, var = 1, geomod = "Exp", anis = c(90, 1), range = 40, nugget = 0),
+  list(me = 1.5, var = 1, geomod = "Exp", anis = c(90, 1), range = 40, nugget = 0),
+  list(me = 2.5, var = 1, geomod = "Exp", anis = c(90, 1), range = 40, nugget = 0),
+  list(me = 3.5, var = 1, geomod = "Exp", anis = c(90, 1), range = 40, nugget = 0),
+  list(me = 4.5, var = 1, geomod = "Exp", anis = c(90, 1), range = 40, nugget = 0),
+  list(me = 5.5, var = 1, geomod = "Exp", anis = c(90, 1), range = 40, nugget = 0)
+)
+data('blh_synthetic')
+grid = blh_synthetic$grid
+trueK = blh_synthetic$trueK
+qHT1 = blh_synthetic$qHT[1:1]
+oHT1 = blh_synthetic$oHT[1:1]
+oHT_noised <- oHT1
+for (i in 1:length(oHT_noised)){
+  noise = rnorm(n=nrow(oHT_noised[[i]]), mean=0, sd=0.05*sd(oHT_noised[[i]]$data))
+  oHT_noised[[i]]$data <- oHT_noised[[i]]$data + noise
+}
+for(i in 1:length(geo_list)){
+  geo = geo_list[[i]]
+  result <- Finverse(grid =grid, qHT = qHT1, oHT = oHT_noised, nsim=50, itermax=10, lrw=320000,
+                     geo = geo)
+  lire[[i]] = result
+}
+### save the result
+saveRDS(lire, file = "E:/HydroTomo/result_blh_synthetic_with-obs-error-sd0_05_prior-info-test1-3-detailed-mean.rds")
+```
+
+```{r plot_detailed_prior_mean_influence, eval=FALSE}
+lire = readRDS(file = "E:/HydroTomo/result_blh_synthetic_with-obs-error-sd0_05_prior-info-test1-3-detailed-mean.rds")
+i1 = c("(a) 先验均值=0.5",
+        "(b) 先验均值=1.5",
+        "(c) 先验均值=2.5",
+        "(d) 先验均值=3.5",
+        "(e) 先验均值=4.5",
+        "(f) 先验均值=5.5")
+for(i in 1:6){
+  niterm = length(lire[[i]])
+  oHT1 = blh_synthetic$oHT[1]
+  tmp = inversePlot(niterm=niterm,grid=grid,iterdf = lire[[i]],oHT = oHT1,trueK=trueK,
+                    p1title = i1[i],
+                    p1z = "ln(T) [L2/T]",
+                    p1xlab = "X/m",
+                    p1ylab = "Y/m",
+                    p2title = i1[i],
+                    p2z = "Var[ln(T)] [L2/T]",
+                    p2xlab = "X/m",
+                    p2ylab = "Y/m",
+                    p3title = i1[i],
+                    p3xlab = "模拟降深/m",
+                    p3ylab = "观测降深/m",
+                    p4title = i1[i],
+                    p4xlab = "参考lnT",
+                    p4ylab = "估计lnT")
+  p1k[[i]] = tmp$lnk
+  p2k[[i]] = tmp$varlnk
+  p3k[[i]] = tmp$headscatter
+  p4k[[i]] = tmp$lnkscatter
+}
+p1 = ggpubr::ggarrange(plotlist = p1k, ncol = 3, nrow = 2)
+p1
+p2 = ggpubr::ggarrange(plotlist = p2k, ncol = 3, nrow = 2)
+p2
+p3 = ggpubr::ggarrange(plotlist = p3k, ncol = 3, nrow = 2)
+p3
+p4 = ggpubr::ggarrange(plotlist = p4k, ncol = 3, nrow = 2)
+p4
+```
+
+Now we use the 1:4 true data set  to do the inversion. Using default prior, and then we use the inverted T to do the prediction on test 5-6.
+
+```{r prediction_using_inverted_T, cache=TRUE, eval=FALSE}
+set.seed(300)
+data('oHT')
+data('qHT')
+# get 1-4 test data
+oHT1 = oHT[c(1,3,5,7)]
+qHT1 = qHT[c(1,3,5,7)]
+
+geo = list(me = 3.5, var = 1, geomod = "Exp", anis = c(90, 1), range = 40, nugget = 0)
+result <- Finverse(grid =grid, qHT = qHT1, oHT = oHT1, nsim=50, itermax=10, lrw=320000,
+                     geo = geo)
+# save the result.
+saveRDS(result, file = "E:/HydroTomo/result_real_data_test1-4.rds")
+```
+
+```{r plot_real_data_inversion_results, eval=FALSE}
+### inverseplot, without trueK.
+result = readRDS(file = "E:/HydroTomo/result_real_data_test1-4.rds")
+data('oHT')
+oHT1 = oHT[c(1,3,5,7)]
+p= inversePlot(niterm=length(result),grid=grid,iterdf = result,oHT = oHT1,trueK=NULL,
+                    p1title = "(a) 1-4次抽水试验反演结果",
+                    p1z = "ln(T) [L2/T]",
+                    p1xlab = "X/m",
+                    p1ylab = "Y/m",
+                    p2title = "(b) 1-4次抽水试验反演结果",
+                    p2z = "Var[ln(T)] [L2/T]",
+                    p2xlab = "X/m",
+                    p2ylab = "Y/m",
+                    p3title = "(c) 1-4次抽水试验反演结果",
+                    p3xlab = "模拟降深/m",
+                    p3ylab = "观测降深/m")
+p$lnk
+p$varlnk
+p$headscatter
+```
+
+```{r plot_real_data_prediction_results, eval=FALSE}
+### now we use that to do the prediction on test 5-6
+niterm = length(result)
+invertedK = result[[niterm]]$meanT
+TT_inv = exp(invertedK)
+# test 5-6
+qHT_pred = qHT[c(9,11)]
+oHT_pred = oHT[c(9,11)]
+pred_results = list()
+for(i in 1:length(qHT_pred)){
+  Qinf = qHT_pred[[i]]
+  simh <- Fsteady2dsim(TT=TT_inv,Qinf=Qinf,grid=grid,lrw=320000)$solution
+  oinf <- oHT_pred[[i]]
+  pred_df = data.frame(observed = oinf$data,
+                       simulated = samData(grid=grid,Oinf=oinf,h=simh)$data)
+  pred_results[[i]] = pred_df
+}
+
+# make pred_results a long data frame
+library(dplyr)
+pred_results_df = dplyr::bind_rows(pred_results,.id='test_id')
+## plot the head scatter
+p_pred = ggplot(pred_results_df, aes(x=-observed, y=-simulated)) +
+  geom_point(color='blue', alpha=0.5) +
+  geom_abline(slope=1, intercept=0, color='red', linetype='dashed') +
+  labs(title='预测结果散点图（使用1-4次试验反演的T）', x='观测降深/m', y='模拟降深/m') +
+  coord_fixed() +
+  theme_minimal()
+p_pred
+
+### save the result
+saveRDS(pred_results_df, file = "E:/HydroTomo/prediction_using_inverted_T_test5-6.rds")
+```
+
+
+Now we check using 1-4 test inverted T to predict test 5-6 results.
+
+```{r inverse_using_1_to_4_prediction_results, eval=FALSE}
+set.seed(300)
+data('oHT')
+data('qHT')
+# get 1-4 test data
+oHT1 = oHT[c(1,3,5,7)]
+qHT1 = qHT[c(1,3,5,7)]
+geo = list(me = 3.5, var = 1, geomod = "Exp", anis = c(90, 1), range = 40, nugget = 0)
+lire = list()
+for(i in 1:4){
+  qHT_pred = qHT1[1:i]
+  oHT_pred = oHT1[1:i]
+  result <- Finverse(grid =grid, qHT = qHT_pred, oHT = oHT_pred, nsim=50, itermax=10, lrw=320000,
+                     geo = geo)
+  lire[[i]] = result
+}
+
+### save the result
+saveRDS(lire, file = "E:/HydroTomo/result_real_data_test1-4_incremental_test.rds")
+```
+
+now we also plot the incremental test results.
+```{r plot_real_data_incremental_inversion_results, eval=FALSE}
+data('oHT')
+data('qHT')
+lire = readRDS(file = "E:/HydroTomo/result_real_data_test1-4_incremental_test.rds")
+p1k = list()
+p2k = list()
+p3k = list()
+i1 = paste0("(",letters[1:4],") " ,1:4,"次抽水试验")
+for(i in 1:4){
+  niterm = length(lire[[i]])
+  oHT1 = oHT[c(1,3,5,7)][1:i]
+  tmp = inversePlot(niterm=niterm,grid=grid,iterdf = lire[[i]],oHT = oHT1,trueK=NULL,
+                    p1title = i1[i],
+                    p1z = "ln(T) [L2/T]",
+                    p1xlab = "X/m",
+                    p1ylab = "Y/m",
+                    p2title = i1[i],
+                    p2z = "Var[ln(T)] [L2/T]",
+                    p2xlab = "X/m",
+                    p2ylab = "Y/m",
+                    p3title = i1[i],
+                    p3xlab = "模拟降深/m",
+                    p3ylab = "观测降深/m")
+  p1k[[i]] = tmp$lnk
+  p2k[[i]] = tmp$varlnk
+  p3k[[i]] = tmp$headscatter
+}
+p1 = ggpubr::ggarrange(plotlist = p1k, ncol=2, nrow=2)
+p1
+p2 = ggpubr::ggarrange(plotlist = p2k, ncol=2, nrow=2)
+p2
+p3 = ggpubr::ggarrange(plotlist = p3k, ncol=2, nrow=2)
+p3
+```
+
+Now we use the 1-4 test inverted T to predict test 5-6 results.
+
+```{r plot_real_data_incremental_prediction_results, eval=FALSE}
+### now we use that to do the prediction on test 5-6
+
+plist = list()
+# test 5-6
+qHT_pred = qHT[c(9,11)]
+oHT_pred = oHT[c(9,11)]
+for(j in 1:4){
+  pred_results = list()
+  niterm = length(lire[[j]])
+  invertedK = lire[[j]][[niterm]]$meanT
+  TT_inv = exp(invertedK)
+for(i in 1:length(qHT_pred)){
+  Qinf = qHT_pred[[i]]
+  simh <- Fsteady2dsim(TT=TT_inv,Qinf=Qinf,grid=grid,lrw=320000)$solution
+  oinf <- oHT_pred[[i]]
+  pred_df = data.frame(observed = oinf$data,
+                       simulated = samData(grid=grid,Oinf=oinf,h=simh)$data)
+  pred_results[[i]] = pred_df
+}
+# make pred_results a long data frame
+library(dplyr)
+pred_results_df = dplyr::bind_rows(pred_results,.id='test_id')
+## plot the head scatter
+p_pred = ggplot(pred_results_df, aes(x=-observed, y=-simulated)) +
+  geom_point(color='blue', alpha=0.5) +
+  geom_abline(slope=1, intercept=0, color='red', linetype='dashed') +
+  labs(title='预测结果散点图（使用1-4次试验反演的T，增量式）', x='观测降深/m', y='模拟降深/m') +
+  theme_minimal()
+p_pred
+
+plist[[j]] = pred_results_df
+}
+
+### save the result
+saveRDS(plist, file = "E:/HydroTomo/prediction_using_inverted_T_test5-6_incremental.rds")
+```
+
+```{r plot_incremental_prediction_results, eval=FALSE}
+plist = readRDS(file = "E:/HydroTomo/prediction_using_inverted_T_test5-6_incremental.rds")
+p_pred = list()
+for(i in 1:4){
+  pred_results_df = plist[[j]]
+  p_pred[[i]] = ggplot(pred_results_df, aes(x=-observed, y=-simulated)) +
+    geom_point(color='blue', alpha=0.5) +
+    geom_abline(slope=1, intercept=0, color='red', linetype='dashed') +
+    labs(title=paste0("(",letters[j],") 使用1-",i,"次试验反演"), x='观测降深/m', y='模拟降深/m') +
+    theme_minimal()
+}
+p_all = ggpubr::ggarrange(plotlist = p_pred, ncol=2, nrow=2)
+p_all
+```
+
+
+Now we  using 1-4 test in blh_syn_best_truth to inverted T .
+
+```{r invert_blh_syn_best_truth, cache=TRUE, eval=FALSE}
+set.seed(300)
+data('blh_syn_best_truth')
+# it seems the blh_syn_best_truth is from blh_synthetic.rmd, set.seed(200)
+grid = blh_syn_best_truth$grid
+trueK = blh_syn_best_truth$trueK
+qHT1 = blh_syn_best_truth$qHT
+oHT1 = blh_syn_best_truth$oHT
+# add 0.05 sd noise
+oHT_noised <- oHT1
+for (i in 1:length(oHT_noised)){
+  noise = rnorm(n=nrow(oHT_noised[[i]]), mean=0, sd=0.05*sd(oHT_noised[[i]]$data))
+  oHT_noised[[i]]$data <- oHT_noised[[i]]$data + noise
+}
+
+geo = list(me = 3.5, var = 1, geomod = "Exp", anis = c(90, 1), range = 40, nugget = 0)
+
+
+lire = list()
+for(i in 1:4){
+  qHT_pred = qHT1[1:i]
+  oHT_pred = oHT_noised[1:i]
+  result <- Finverse(grid =grid, qHT = qHT_pred, oHT = oHT_pred, nsim=50, itermax=10, lrw=320000,
+                     geo = geo)
+  lire[[i]] = result
+}
+# save the result.
+saveRDS(lire, file = "E:/HydroTomo/result_blh_syn_best_truth_test1-4.rds")
+```
+
+
+```{r plot_result_blh_syn_best_truth, cache=TRUE, eval=FALSE}
+set.seed(300)
+# add 0.05 sd noise
+data('blh_syn_best_truth')
+grid = blh_syn_best_truth$grid
+trueK = blh_syn_best_truth$trueK
+qHT1 = blh_syn_best_truth$qHT
+oHT1 = blh_syn_best_truth$oHT
+oHT_noised <- oHT1
+for (i in 1:length(oHT_noised)){
+  noise = rnorm(n=nrow(oHT_noised[[i]]), mean=0, sd=0.05*sd(oHT_noised[[i]]$data))
+  oHT_noised[[i]]$data <- oHT_noised[[i]]$data + noise
+}
+
+lire = readRDS(file = "E:/HydroTomo/result_blh_syn_best_truth_test1-4.rds")
+p1k = list()
+p2k = list()
+p3k = list()
+i1 = paste0("(",letters[1:4],") " ,1:4,"次抽水试验，观测数据含5%噪声")
+for(i in 1:4){
+  niterm = length(lire[[i]])
+  oHT_pred = oHT_noised[1:i]
+  tmp = inversePlot(niterm=niterm,grid=grid,iterdf = lire[[i]],oHT = oHT_pred,trueK=trueK,
+                    p1title = i1[i],
+                    p1z = "ln(T) [L2/T]",
+                    p1xlab = "X/m",
+                    p1ylab = "Y/m",
+                    p2title = i1[i],
+                    p2z = "Var[ln(T)] [L2/T]",
+                    p2xlab = "X/m",
+                    p2ylab = "Y/m",
+                    p3title = i1[i],
+                    p3xlab = "模拟降深/m",
+                    p3ylab = "观测降深/m")
+  p1k[[i]] = tmp$lnk
+  p2k[[i]] = tmp$varlnk
+  p3k[[i]] = tmp$headscatter
+}
+p1 = ggpubr::ggarrange(plotlist = p1k, ncol=2, nrow=2)
+p1
+p2 = ggpubr::ggarrange(plotlist = p2k, ncol=2, nrow=2)
+p2
+p3 = ggpubr::ggarrange(plotlist = p3k, ncol=2, nrow=2)
+p3
+```
+
+
+Now we use the 1-4 test inverted T to predict test 5-6 results and plot.
+
+```{r plot_blh_syn_best_truth_prediction_results, eval=FALSE}
+### now we use that to do the prediction on test 5-6
+plist = list()
+# test 5-6
+qHT_pred = qHT1[c(5,6)]
+oHT_pred = oHT_noised[c(5,6)]
+for(j in 1:4){
+  pred_results = list()
+  niterm = length(lire[[j]])
+  invertedK = lire[[j]][[niterm]]$meanT
+  TT_inv = exp(invertedK)
+  for(i in 1:length(qHT_pred)){
+    Qinf = qHT_pred[[i]]
+    simh <- Fsteady2dsim(TT=TT_inv,Qinf=Qinf,grid=grid,lrw=320000)$solution
+    oinf <- oHT_pred[[i]]
+    pred_df = data.frame(observed = oinf$data,
+                         simulated = samData(grid=grid,Oinf=oinf,h=simh)$data)
+    pred_results[[i]] = pred_df
+  }
+  # make pred_results a long data frame
+  library(dplyr)
+  pred_results_df = dplyr::bind_rows(pred_results,.id='test_id')
+  ## plot the head scatter
+  p_pred = ggplot(pred_results_df, aes(x=observed, y=simulated)) +
+    geom_point(color='blue', alpha=0.5) +
+    geom_abline(slope=1, intercept=0, color='red', linetype='dashed') +
+    labs(title='预测结果散点图（使用1-4次试验反演的T）', x='观测降深/m', y='模拟降深/m') +
+    theme_minimal()
+  p_pred
+  
+  plist[[j]] = pred_results_df
+}
+### save the result
+saveRDS(plist, file = "E:/HydroTomo/prediction_using_inverted_T_blh_syn_best_truth_test5-6.rds")
+```
+
+```{r plot_blh_syn_best_truth_prediction_results, eval=FALSE}
+plist = readRDS(file = "E:/HydroTomo/prediction_using_inverted_T_blh_syn_best_truth_test5-6.rds")
+p_pred = list()
+for(i in 1:4){
+  pred_results_df = plist[[j]]
+  p_pred[[i]] = ggplot(pred_results_df, aes(x=observed, y=simulated)) +
+    geom_point(color='blue', alpha=0.5) +
+    geom_abline(slope=1, intercept=0, color='red', linetype='dashed') +
+    labs(title=paste0("(",letters[j],") 使用1-",j,"次i验反演的T预测5-6次试验结果"), x='观测降深/m', y='模拟降深/m') +
+    theme_minimal()
+}
+p_all = ggpubr::ggarrange(plotlist = p_pred, ncol=2, nrow=2)
+p_all
+```
+
+
+# generate a random field using range =20
+
+```{r generate_random_field_range20, cache=TRUE, eval=FALSE}
+set.seed(400)
+data('blh_synthetic')
+grid = blh_synthetic$grid
+trueK = blh_synthetic$trueK
+qHT1 = blh_synthetic$qHT
+oHT1 = blh_synthetic$oHT
+geo = list(me = 3.5, var = 1, geomod = "Exp", anis = c(90, 1), range = 20, nugget = 0)
+trueK <- random2d(nsim=1,grid=grid,geo = geo)
+Plotparameter2d(TT=trueK,iflog=T)
+```
+
+Now we use this T field to generate synethetic data for test 1-6.
+
+```{r generate_synthetic_data_range20, cache=TRUE, eval=FALSE}
+set.seed(400)
+data('blh_synthetic')
+grid = blh_synthetic$grid
+qHT1 = blh_synthetic$qHT
+oHT1 = blh_synthetic$oHT
+TT <- trueK$Tp
+for (i in 1:length(oHT1)){
+  Qinf <- qHT1[[i]]
+  trueh <- Fsteady2dsim(TT=TT,Qinf=Qinf,grid=grid,lrw=320000)$solution
+  oinf <- oHT1[[i]]
+  oinf = samData(grid = grid,Oinf = oinf,h=trueh)
+  oHT1[[i]] <- oinf[,c('data','x','y')]
+}
+
+dfoHT1 = do.call(rbind, oHT1)
+mean_oHT1 = mean(dfoHT1$data)
+print(paste("The mean value of oHT1 is ", round(mean_oHT1,4)))
+
+```
+We save the data as 'blh_synthetic_range20' object.
+
+```{r save_blh_synthetic_range20, cache=TRUE, eval=FALSE}
+blh_synthetic_range20 = list()
+blh_synthetic_range20$grid = grid
+blh_synthetic_range20$trueK = TT
+blh_synthetic_range20$qHT = qHT1
+blh_synthetic_range20$oHT = oHT1
+saveRDS(blh_synthetic_range20, file = "E:/HydroTomo/blh_synthetic_range20.rds")
+```
+
+we use the synthetic data (add 0.1 sd noise ) to do the inversion.
+
+```{r invert_synthetic_data_range20, cache=TRUE, eval=FALSE}
+set.seed(400)
+blh_synthetic_range20 = readRDS(file = "E:/HydroTomo/blh_synthetic_range20.rds")
+grid = blh_synthetic_range20$grid
+trueK = blh_synthetic_range20$trueK
+qHT1 = blh_synthetic_range20$qHT
+oHT1 = blh_synthetic_range20$oHT
+oHT_noised <- oHT1
+for (i in 1:length(oHT_noised)){
+  noise = rnorm(n=nrow(oHT_noised[[i]]), mean=0, sd=0.1*sd(oHT_noised[[i]]$data))
+  oHT_noised[[i]]$data <- oHT_noised[[i]]$data + noise
+}
+
+geo = list(me = 3.5, var = 1, geomod = "Exp", anis = c(90, 1), range = 20, nugget = 0)
+
+# do incremental inversion using data test 1, test 1-2, test 1-3, ..., test 1-4.
+lire = list()
+for(i in 1:4){
+  qHT_pred = qHT1[1:i]
+  oHT_pred = oHT_noised[1:i]
+  result <- Finverse(grid =grid, qHT = qHT_pred, oHT = oHT_pred, nsim=50, itermax=10, lrw=320000,
+                     geo = geo)
+  lire[[i]] = result
+}
+
+# save the result.
+saveRDS(lire, file = "E:/HydroTomo/result_blh_synthetic_range20_with-obs-error-sd0_1.rds")
+```
+
+
+plot the inverse result.
+
+```{r plot_inversion_results_range20, eval=FALSE}
+blh_synthetic_range20 = readRDS(file = "E:/HydroTomo/blh_synthetic_range20.rds")
+grid = blh_synthetic_range20$grid
+trueK = blh_synthetic_range20$trueK
+trueK = data.frame(x=grid$grid$x, y=grid$grid$y, Tp=trueK)
+lire = readRDS(file = "E:/HydroTomo/result_blh_synthetic_range20_with-obs-error-sd0_1.rds")
+p1k = list()
+p2k = list()
+p3k = list()
+p4k = list()
+i1 = paste0("(",letters[1:4],") " ,1:4,"次抽水试验，观测数据含10%噪声")
+for(i in 1:4){
+  niterm = length(lire[[i]])
+  oHT_pred = blh_synthetic_range20$oHT[1:i]
+  tmp = inversePlot(niterm=niterm,grid=grid,iterdf = lire[[i]],oHT = oHT_pred,trueK=trueK,
+                    p1title = i1[i],
+                    p1z = "ln(T) [L2/T]",
+                    p1xlab = "X/m",
+                    p1ylab = "Y/m",
+                    p2title = i1[i],
+                    p2z = "Var[ln(T)] [L2/T]",
+                    p2xlab = "X/m",
+                    p2ylab = "Y/m",
+                    p3title = i1[i],
+                    p3xlab = "模拟降深/m",
+                    p3ylab = "观测降深/m")
+  p1k[[i]] = tmp$lnk
+  p2k[[i]] = tmp$varlnk
+  p3k[[i]] = tmp$headscatter
+  p4k[[i]] = tmp$lnkscatter
+}
+p1 = ggpubr::ggarrange(plotlist = p1k, ncol=2, nrow=2)
+p1
+p2 = ggpubr::ggarrange(plotlist = p2k, ncol=2, nrow=2)
+p2
+p3 = ggpubr::ggarrange(plotlist = p3k, ncol=2, nrow=2)
+p3
+p4 = ggpubr::ggarrange(plotlist = p4k, ncol=2, nrow=2)
+p4
+```
+
+
+Now we use the 1-4 test inverted T to predict test 5-6 results and plot.
+
+```{r plot_prediction_results_range20, eval=FALSE}
+### now we use that to do the prediction on test 5-6
+plist = list()
+# test 5-6
+qHT_pred = blh_synthetic_range20$qHT[c(5,6)]
+oHT_pred = blh_synthetic_range20$oHT[c(5,6)]
+for(j in 1:4){
+  pred_results = list()
+  niterm = length(lire[[j]])
+  invertedK = lire[[j]][[niterm]]$meanT
+  TT_inv = exp(invertedK)
+  for(i in 1:length(qHT_pred)){
+    Qinf = qHT_pred[[i]]
+    simh <- Fsteady2dsim(TT=TT_inv,Qinf=Qinf,grid=grid,lrw=320000)$solution
+    oinf <- oHT_pred[[i]]
+    pred_df = data.frame(observed = oinf$data,
+                         simulated = samData(grid=grid,Oinf=oinf,h=simh)$data)
+    pred_results[[i]] = pred_df
+  }
+  # make pred_results a long data frame
+  library(dplyr)
+  pred_results_df = dplyr::bind_rows(pred_results,.id='test_id')
+  ## plot the head scatter
+  p_pred = ggplot(pred_results_df, aes(x=observed, y=simulated)) +
+    geom_point(color='blue', alpha=0.5) +
+    geom_abline(slope=1, intercept=0, color='red', linetype='dashed') +
+    labs(title='预测结果散点图（使用1-4次试验反演的T）', x='观测降深/m', y='模拟降深/m') +
+    theme_minimal()
+  p_pred
+  plist[[j]] = pred_results_df
+}
+### save the result
+saveRDS(plist, file = "E:/HydroTomo/prediction_using_inverted_T_blh_synthetic_range20_test5-6.rds")
+```
+
+```{r plot_prediction_results_range20, eval=FALSE}
+plist = readRDS(file = "E:/HydroTomo/prediction_using_inverted_T_blh_synthetic_range20_test5-6.rds")
+p_pred = list()
+for(i in 1:4){
+  pred_results_df = plist[[j]]
+  p_pred[[i]] = ggplot(pred_results_df, aes(x=observed, y=simulated)) +
+    geom_point(color='blue', alpha=0.5) +
+    geom_abline(slope=1, intercept=0, color='red', linetype='dashed') +
+    labs(title=paste0("(",letters[j],") 使用1-",j,"次i验反演的T预测5-6次试验结果"), x='观测降深/m', y='模拟降深/m') +
+    theme_minimal()
+}
+p_all = ggpubr::ggarrange(plotlist = p_pred, ncol=2, nrow=2)
+p_all
+```
+Now we calculate the rmse for the four cases.
+
+```{r calculate_rmse_range20, eval=FALSE}
+plist = readRDS(file = "E:/HydroTomo/prediction_using_inverted_T_blh_synthetic_range20_test5-6.rds")
+mc = data.frame(test_id = character(),
+                rmse = numeric(),
+                r2 = numeric())
+for(i in 1:4){
+  pred_results_df = plist[[i]]
+  rmse = sqrt(mean((pred_results_df$observed - pred_results_df$simulated)^2))
+  r2 = cor(pred_results_df$observed, pred_results_df$simulated)^2
+  mc = rbind(mc, data.frame(test_id = paste0("1-",i,"次试验"), rmse = rmse, r2 = r2))
+}
+mc
+```
+
+
+Now we reduce the number of observation in each test.
+
+```{r invert_synthetic_data_range20_fewer_obs, cache=TRUE, eval=FALSE}
+set.seed(400)
+blh_synthetic_range20 = readRDS(file = "E:/HydroTomo/blh_synthetic_range20.rds")
+grid = blh_synthetic_range20$grid
+trueK = blh_synthetic_range20$trueK
+qHT1 = blh_synthetic_range20$qHT
+oHT1 = blh_synthetic_range20$oHT
+oHT_noised <- oHT1
+for (i in 1:length(oHT_noised)){
+  noise = rnorm(n=nrow(oHT_noised[[i]]), mean=0, sd=0.1*sd(oHT_noised[[i]]$data))
+  oHT_noised[[i]]$data <- oHT_noised[[i]]$data + noise
+}
+
+oHT_reduced = list()
+for(i in 1:length(oHT_noised)){
+  oinf = oHT_noised[[i]]
+  # sample 40% of the data
+  set.seed(400 + i)
+  sampled_indices = sample(1:nrow(oinf), size = floor(0.4 * nrow(oinf)), replace = FALSE)
+  oinf_reduced = oinf[sampled_indices, ]
+  oHT_reduced[[i]] = oinf_reduced
+}
+
+geo = list(me = 3.5, var = 1, geomod = "Exp", anis = c(90, 1), range = 20, nugget = 0)
+# do incremental inversion using data test 1, test 1-2, test 1-3, ..., test 1-4.
+lire = list()
+for(i in 1:4){
+  qHT_pred = qHT1[1:i]
+  oHT_pred = oHT_reduced[1:i]
+  result <- Finverse(grid =grid, qHT = qHT_pred, oHT = oHT_pred, nsim=50, itermax=10, lrw=320000,
+                     geo = geo)
+  lire[[i]] = result
+}
+# save the result.
+saveRDS(lire, file = "E:/HydroTomo/result_blh_synthetic_range20_with-obs-error-sd0_1_fewer-obs.rds")
+```
+
+```{r plot_inversion_results_range20_fewer_obs, eval=FALSE}
+blh_synthetic_range20 = readRDS(file = "E:/HydroTomo/blh_synthetic_range20.rds")
+grid = blh_synthetic_range20$grid
+trueK = blh_synthetic_range20$trueK
+trueK = data.frame(x=grid$grid$x, y=grid$grid$y, Tp=trueK)
+lire = readRDS(file = "E:/HydroTomo/result_blh_synthetic_range20_with-obs-error-sd0_1_fewer-obs.rds")
+p1k = list()
+p2k = list()
+p3k = list()
+p4k = list()
+i1 = paste0("(",letters[1:4],") " ,1:4,"次抽水试验，观测数据含10%噪声，观测点数40%")
+for(i in 1:4){
+  niterm = length(lire[[i]])
+  oHT_pred = oHT_reduced[1:i]
+  tmp = inversePlot(niterm=niterm,grid=grid,iterdf = lire[[i]],oHT = oHT_pred,trueK=trueK,
+                    p1title = i1[i],
+                    p1z = "ln(T) [L2/T]",
+                    p1xlab = "X/m",
+                    p1ylab = "Y/m",
+                    p2title = i1[i],
+                    p2z = "Var[ln(T)] [L2/T]",
+                    p2xlab = "X/m",
+                    p2ylab = "Y/m",
+                    p3title = i1[i],
+                    p3xlab = "模拟降深/m",
+                    p3ylab = "观测降深/m")
+  p1k[[i]] = tmp$lnk
+  p2k[[i]] = tmp$varlnk
+  p3k[[i]] = tmp$headscatter
+  p4k[[i]] = tmp$lnkscatter
+}
+p1 = ggpubr::ggarrange(plotlist = p1k, ncol=2, nrow=2)
+p1
+p2 = ggpubr::ggarrange(plotlist = p2k, ncol=2, nrow=2)
+p2
+p3 = ggpubr::ggarrange(plotlist = p3k, ncol=2, nrow=2)
+p3
+p4 = ggpubr::ggarrange(plotlist = p4k, ncol=2, nrow=2)
+p4
+```
+
+Now we use the 1-4 test inverted T to predict test 5-6 results and plot.
+```{r plot_prediction_results_range20_fewer_obs, eval=FALSE}
+### now we use that to do the prediction on test 5-6
+plist = list()
+# test 5-6
+qHT_pred = blh_synthetic_range20$qHT[c(5,6)]
+oHT_pred = blh_synthetic_range20$oHT[c(5,6)]
+for(j in 1:4){
+  pred_results = list()
+  niterm = length(lire[[j]])
+  invertedK = lire[[j]][[niterm]]$meanT
+  TT_inv = exp(invertedK)
+  for(i in 1:length(qHT_pred)){
+    Qinf = qHT_pred[[i]]
+    simh <- Fsteady2dsim(TT=TT_inv,Qinf=Qinf,grid=grid,lrw=320000)$solution
+    oinf <- oHT_pred[[i]]
+    pred_df = data.frame(observed = oinf$data,
+                         simulated = samData(grid=grid,Oinf=oinf,h=simh)$data)
+    pred_results[[i]] = pred_df
+  }
+  # make pred_results a long data frame
+  library(dplyr)
+  pred_results_df = dplyr::bind_rows(pred_results,.id='test_id')
+
+  plist[[j]] = pred_results_df
+}
+### save the result
+saveRDS(plist, file = "E:/HydroTomo/prediction_using_inverted_T_blh_synthetic_range20_test5-6_fewer-obs.rds")
+```
+
+
+```{r plot_prediction_results_range20_fewer_obs, eval=FALSE}
+plist = readRDS(file = "E:/HydroTomo/prediction_using_inverted_T_blh_synthetic_range20_test5-6_fewer-obs.rds")
+p_pred = list()
+for(i in 1:4){
+  pred_results_df = plist[[i]]
+  p_pred[[i]] = ggplot(pred_results_df, aes(x=observed, y=simulated)) +
+    geom_point(color='blue', alpha=0.5) +
+    geom_abline(slope=1, intercept=0, color='red', linetype='dashed') +
+    labs(title=paste0("(",letters[i],") 使用1-",i,"次i验反演的T预测5-6次试验结果，观测点数减半"), x='观测降深/m', y='模拟降深/m') +
+    theme_minimal()
+}
+p_all = ggpubr::ggarrange(plotlist = p_pred, ncol=2, nrow=2)
+p_all
+```
+Now calculate rmse and r2.
+
+```{r calculate_rmse_range20_less_obs, eval=FALSE}
+plist = readRDS(file = "E:/HydroTomo/prediction_using_inverted_T_blh_synthetic_range20_test5-6_fewer-obs.rds")
+mc = data.frame(test_id = character(),
+                rmse = numeric(),
+                r2 = numeric())
+for(i in 1:4){
+  pred_results_df = plist[[i]]
+  rmse = sqrt(mean((pred_results_df$observed - pred_results_df$simulated)^2))
+  r2 = cor(pred_results_df$observed, pred_results_df$simulated)^2
+  mc = rbind(mc, data.frame(test_id = paste0("1-",i,"次试验"), rmse = rmse, r2 = r2))
+}
+mc
+```
+
+
+
+Now we reduce the number of observation and set noise = 0 in each test.
+
+```{r invert_synthetic_data_range20_fewer_obs, cache=TRUE, eval=FALSE}
+set.seed(400)
+blh_synthetic_range20 = readRDS(file = "E:/HydroTomo/blh_synthetic_range20.rds")
+grid = blh_synthetic_range20$grid
+trueK = blh_synthetic_range20$trueK
+qHT1 = blh_synthetic_range20$qHT
+oHT1 = blh_synthetic_range20$oHT
+oHT_noised <- oHT1
+for (i in 1:length(oHT_noised)){
+  noise = rnorm(n=nrow(oHT_noised[[i]]), mean=0, sd=0.05*sd(oHT_noised[[i]]$data))
+  oHT_noised[[i]]$data <- oHT_noised[[i]]$data + noise
+}
+
+oHT_reduced = list()
+for(i in 1:length(oHT_noised)){
+  oinf = oHT_noised[[i]]
+  # sample 40% of the data
+  set.seed(400 + i)
+  sampled_indices = sample(1:nrow(oinf), size = floor(0.3 * nrow(oinf)), replace = FALSE)
+  oinf_reduced = oinf[sampled_indices, ]
+  oHT_reduced[[i]] = oinf_reduced
+}
+
+geo = list(me = 3.5, var = 1, geomod = "Exp", anis = c(90, 1), range = 20, nugget = 0)
+# do incremental inversion using data test 1, test 1-2, test 1-3, ..., test 1-4.
+lire = list()
+for(i in 1:4){
+  qHT_pred = qHT1[1:i]
+  oHT_pred = oHT_reduced[1:i]
+  result <- Finverse(grid =grid, qHT = qHT_pred, oHT = oHT_pred, nsim=50, itermax=15, lrw=320000,
+                     geo = geo)
+  lire[[i]] = result
+}
+# save the result.
+saveRDS(lire, file = "E:/HydroTomo/result_blh_synthetic_range20_with-obs-error-sd0_0_fewerer-obs.rds")
+```
+
+```{r plot_inversion_results_range20_fewer_obs_noise0.0, eval=FALSE}
+blh_synthetic_range20 = readRDS(file = "E:/HydroTomo/blh_synthetic_range20.rds")
+grid = blh_synthetic_range20$grid
+trueK = blh_synthetic_range20$trueK
+trueK = data.frame(x=grid$grid$x, y=grid$grid$y, Tp=trueK)
+lire = readRDS(file = "E:/HydroTomo/result_blh_synthetic_range20_with-obs-error-sd0_0_fewerer-obs.rds")
+p1k = list()
+p2k = list()
+p3k = list()
+p4k = list()
+i1 = paste0("(",letters[1:4],") " ,1:4,"次抽水试验，观测数据含0%噪声，观测点数40%")
+for(i in 1:4){
+  niterm = length(lire[[i]])
+  oHT_pred = oHT_reduced[1:i]
+  tmp = inversePlot(niterm=niterm,grid=grid,iterdf = lire[[i]],oHT = oHT_pred,trueK=trueK,
+                    p1title = i1[i],
+                    p1z = "ln(T) [L2/T]",
+                    p1xlab = "X/m",
+                    p1ylab = "Y/m",
+                    p2title = i1[i],
+                    p2z = "Var[ln(T)] [L2/T]",
+                    p2xlab = "X/m",
+                    p2ylab = "Y/m",
+                    p3title = i1[i],
+                    p3xlab = "模拟降深/m",
+                    p3ylab = "观测降深/m")
+  p1k[[i]] = tmp$lnk
+  p2k[[i]] = tmp$varlnk
+  p3k[[i]] = tmp$headscatter
+  p4k[[i]] = tmp$lnkscatter
+}
+p1 = ggpubr::ggarrange(plotlist = p1k, ncol=2, nrow=2)
+p1
+p2 = ggpubr::ggarrange(plotlist = p2k, ncol=2, nrow=2)
+p2
+p3 = ggpubr::ggarrange(plotlist = p3k, ncol=2, nrow=2)
+p3
+p4 = ggpubr::ggarrange(plotlist = p4k, ncol=2, nrow=2)
+p4
+```
+
+Now we use the 1-4 test inverted T to predict test 5-6 results and plot.
+```{r plot_prediction_results_range20_fewer_obs_noise_0.0, eval=FALSE}
+### now we use that to do the prediction on test 5-6
+plist = list()
+# test 5-6
+qHT_pred = blh_synthetic_range20$qHT[c(5,6)]
+oHT_pred = blh_synthetic_range20$oHT[c(5,6)]
+for(j in 1:4){
+  pred_results = list()
+  niterm = length(lire[[j]])
+  invertedK = lire[[j]][[niterm]]$meanT
+  TT_inv = exp(invertedK)
+  for(i in 1:length(qHT_pred)){
+    Qinf = qHT_pred[[i]]
+    simh <- Fsteady2dsim(TT=TT_inv,Qinf=Qinf,grid=grid,lrw=320000)$solution
+    oinf <- oHT_pred[[i]]
+    pred_df = data.frame(observed = oinf$data,
+                         simulated = samData(grid=grid,Oinf=oinf,h=simh)$data)
+    pred_results[[i]] = pred_df
+  }
+  # make pred_results a long data frame
+  library(dplyr)
+  pred_results_df = dplyr::bind_rows(pred_results,.id='test_id')
+
+  plist[[j]] = pred_results_df
+}
+### save the result
+saveRDS(plist, file = "E:/HydroTomo/prediction_using_inverted_T_blh_synthetic_range20_test5-6_fewerer-obs_noise_0.0.rds")
+```
+
+
+```{r plot_prediction_results_range20_fewer_obs_noise_0.0, eval=FALSE}
+plist = readRDS(file = "E:/HydroTomo/prediction_using_inverted_T_blh_synthetic_range20_test5-6_fewerer-obs_noise_0.0.rds")
+p_pred = list()
+for(i in 1:4){
+  pred_results_df = plist[[i]]
+  p_pred[[i]] = ggplot(pred_results_df, aes(x=observed, y=simulated)) +
+    geom_point(color='blue', alpha=0.5) +
+    geom_abline(slope=1, intercept=0, color='red', linetype='dashed') +
+    labs(title=paste0("(",letters[i],") 使用1-",i,"次i验反演的T预测5-6次试验结果，观测点数减半"), x='观测降深/m', y='模拟降深/m') +
+    theme_minimal()
+}
+p_all = ggpubr::ggarrange(plotlist = p_pred, ncol=2, nrow=2)
+p_all
+```
+Now calculate rmse and r2.
+
+```{r calculate_rmse_range20_less_obs_noise_0.0, eval=FALSE}
+plist = readRDS(file = "E:/HydroTomo/prediction_using_inverted_T_blh_synthetic_range20_test5-6_fewerer-obs_noise_0.0.rds")
+mc = data.frame(test_id = character(),
+                rmse = numeric(),
+                r2 = numeric())
+for(i in 1:4){
+  pred_results_df = plist[[i]]
+  rmse = sqrt(mean((pred_results_df$observed - pred_results_df$simulated)^2))
+  r2 = cor(pred_results_df$observed, pred_results_df$simulated)^2
+  mc = rbind(mc, data.frame(test_id = paste0("1-",i,"次试验"), rmse = rmse, r2 = r2))
+}
+mc
 ```

@@ -19,7 +19,8 @@ Finverse(
   rmsemin = 0,
   mul = 1,
   oHT = list(data.frame(data = -1, x = 11, y = 11)),
-  lrw = 160000
+  lrw = 160000,
+  geo = list(me = 0, var = 1, geomod = "Exp", anis = c(90, 1), range = 30, nugget = 0)
 )
 }
 \arguments{
@@ -42,6 +43,8 @@ Finverse(
 \item{oHT}{list of observation information. list(data.frame(data,x,y))}
 
 \item{lrw}{integer, the length of the real work array, default 160000 (grid size).}
+
+\item{geo}{prior information for lnT, geostatistical features: list(mean,variance,covarirance_function,anisotropy,range,nugget)}
 }
 \value{
 list of iteration data.
@@ -70,7 +73,7 @@ Oinf1 <- data.frame(data=NA,x=loc$x,y=loc$y)
 Oinf1 <- samData(grid = grid,Oinf = Oinf1,h=trueh$solution)
 oHT <- list(test1 = Oinf1)
 result <- Finverse(grid =grid, qHT = qHT, oHT = oHT)
-inversePlot(niterm=5,iterdf = result,oHT = oHT,trueK=trueK)
+inversePlot(niterm=5,iterdf = result,oHT = oHT,trueK=trueK,grid=grid)
 Qinf2=data.frame(Qp=10,xp=10.5,yp=10.5)
 trueh2 <- Fsteady2dsim(TT=TT,Qinf=Qinf2,domain=domain)
 Oinf2 <- Oinf1
@@ -78,5 +81,5 @@ Oinf2 <- samData(grid = grid,Oinf = Oinf2,h=trueh2$solution)
 oHT <- list(test1 = Oinf1,test2 = Oinf2)
 qHT <- list(test1 = Qinf1,test2 = Qinf2)
 result <- Finverse(grid =grid, qHT = qHT, oHT = oHT)
-inversePlot(niterm=5,iterdf = result,oHT = oHT,trueK=trueK)
+inversePlot(niterm=5,iterdf = result,oHT = oHT,trueK=trueK,grid=grid)
 }

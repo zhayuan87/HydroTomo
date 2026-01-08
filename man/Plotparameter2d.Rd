@@ -11,7 +11,11 @@ Plotparameter2d(
   plotfile = NULL,
   plotwidth = 10,
   plotheight = 10,
-  iflog = FALSE
+  iflog = FALSE,
+  title = NULL,
+  z = NULL,
+  xlab = "X/m",
+  ylab = "Y/m"
 )
 }
 \arguments{
@@ -28,6 +32,14 @@ Plotparameter2d(
 \item{plotheight}{a numeric value, the height of the plot.}
 
 \item{iflog}{a logical value, if true,  use log(T), else using T.}
+
+\item{title}{a string, the title of the plot.}
+
+\item{z}{a string, the label of z axis.}
+
+\item{xlab}{a string, the label of x axis.}
+
+\item{ylab}{a string, the label of y axis.}
 }
 \value{
 a plot showing contour.

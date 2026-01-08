@@ -4,7 +4,27 @@
 \alias{inversePlot}
 \title{now we can choose the best iteration to plot.}
 \usage{
-inversePlot(niterm = 1, grid, iterdf, oHT, trueK = NULL)
+inversePlot(
+  niterm = 1,
+  grid,
+  iterdf,
+  oHT,
+  trueK = NULL,
+  p1title = "Est. lnT value",
+  p1z = "lnT",
+  p1xlab = "X/m",
+  p1ylab = "Y/m",
+  p2title = "Est. var. of lnT",
+  p2z = "var. of lnT",
+  p2xlab = "X/m",
+  p2ylab = "Y/m",
+  p3title = "Drawdown scatter",
+  p3xlab = "Obs. Drawdown/m",
+  p3ylab = "Sim. Drawdown/m",
+  p4title = "lnT scatter",
+  p4xlab = "True lnT /(m2/d)",
+  p4ylab = "Est. lnT /(m2/d)"
+)
 }
 \arguments{
 \item{niterm}{the number of iterations.}
@@ -16,6 +36,34 @@ inversePlot(niterm = 1, grid, iterdf, oHT, trueK = NULL)
 \item{oHT}{list of observation information. list(data.frame(data,x,y))}
 
 \item{trueK}{the true K field (used in synthetic case).}
+
+\item{p1title}{title of plot 1 (value of lnT).}
+
+\item{p1z}{z label of plot 1.}
+
+\item{p1xlab}{x label of plot 1.}
+
+\item{p1ylab}{y label of plot 1.}
+
+\item{p2title}{title of plot 2 (value of lnT variance).}
+
+\item{p2z}{z label of plot 2.}
+
+\item{p2xlab}{x label of plot 2.}
+
+\item{p2ylab}{y label of plot 2.}
+
+\item{p3title}{title of plot 3(head scatter).}
+
+\item{p3xlab}{x label of plot 3.}
+
+\item{p3ylab}{y label of plot 3.}
+
+\item{p4title}{title of plot 4(lnT scatter).}
+
+\item{p4xlab}{x label of plot 4.}
+
+\item{p4ylab}{y label of plot 4.}
 }
 \description{
 now we can choose the best iteration to plot.

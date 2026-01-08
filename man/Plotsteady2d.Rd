@@ -13,7 +13,11 @@ Plotsteady2d(
   plotheight = 10,
   ifdrawdown = TRUE,
   Qinf = NULL,
-  Oinf = NULL
+  Oinf = NULL,
+  title = NULL,
+  z = NULL,
+  xlab = "X/m",
+  ylab = "Y/m"
 )
 }
 \arguments{
@@ -32,6 +36,14 @@ Plotsteady2d(
 \item{Qinf}{The pumping test information in a data.frame (Qp,xp,yp).}
 
 \item{Oinf}{The observation information in a data.frame (data,x,y).}
+
+\item{title}{a string, the title of the plot.}
+
+\item{z}{a string, the label of z axis.}
+
+\item{xlab}{a string, the label of x axis.}
+
+\item{ylab}{a string, the label of y axis.}
 
 \item{steady2d}{a data.frame, the result of Fsteady2dsim (x,y,headchange).}
 }

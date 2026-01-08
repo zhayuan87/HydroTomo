@@ -189,7 +189,8 @@ inversePlot <- function(niterm=1,grid,iterdf,oHT,trueK=NULL,
   p3
 
   if(!is.null(trueK)){
-    scatterks <- data.frame(x=log(trueK$Tp),y=log(iterdf[[niterm]]$meanT))
+    # scatterks <- data.frame(x=log(trueK$Tp),y=log(iterdf[[niterm]]$meanT))
+    scatterks <- data.frame(x=log(trueK$Tp),y=iterdf[[niterm]]$meanT) # inverse directly store lnT. 2026.01.01
     p4 <- ggplot(scatterks) +
       aes(x,y) +
       geom_point(size=1)+
