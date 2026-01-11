@@ -30,7 +30,7 @@
 #' \describe{
 #'   \item{A1-1}{data frame of pumping test 1, with columns Qp(m3/d), x, y.}
 #'   \item{A1-2}{data frame of pumping test 2, with columns Qp, x, y.}
-#'   ...
+#'   \item{...}{...}
 #'   }
 "qHT"
 
@@ -39,7 +39,7 @@
 #' \describe{
 #'   \item{A1-1}{data frame of pumping test 1, with columns data(drawdown in m), x, y.}
 #'   \item{A1-2}{data frame of pumping test 2, with columns data, x, y.}
-#'   ...
+#'   \item{...}{...}
 #'   }
 "oHT"
 

@@ -14,6 +14,8 @@ random2d(
 \arguments{
 \item{domain}{c(Nx,Ny,x1,x2,y1,y2) domain of the grid.}
 
+\item{grid}{generated grid information.}
+
 \item{geo}{geostatistical features: list(mean,variance,covarirance_function,anisotropy,range,nugget)}
 
 \item{nsim}{number of simulations.}

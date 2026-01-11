@@ -9,7 +9,7 @@ A list of 12 data frames, each data frame contains observation data and location
 \describe{
 \item{A1-1}{data frame of pumping test 1, with columns data(drawdown in m), x, y.}
 \item{A1-2}{data frame of pumping test 2, with columns data, x, y.}
-...
+\item{...}{...}
 }
 }
 \usage{

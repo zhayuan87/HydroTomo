@@ -118,7 +118,7 @@ lire = list()
 for(i in 1:6){
   qHT1 = blh_synthetic$qHT[1:i]
   oHT1 = blh_synthetic$oHT[1:i]
-  result <- Finverse(grid =grid, qHT = qHT1, oHT = oHT1, nsim=50, itermax=10, lrw=320000,
+  result <- Finverse3(grid =grid, qHT = qHT1, oHT = oHT1, nsim=50, itermax=15, lrw=320000, decay=2,ncore=12,
                      geo = list(me = 3.5, var = 1, geomod = "Exp", anis = c(90, 1), range = 40, nugget = 0))
   lire[[i]] = result
 }
@@ -193,7 +193,7 @@ lire = list()
 for(i in 1:6){
   qHT1 = blh_synthetic$qHT[1:i]
   oHT1 = oHT_noised[1:i]
-  result <- Finverse(grid =grid, qHT = qHT1, oHT = oHT1, nsim=50, itermax=10, lrw=320000,
+  result <- Finverse3(grid =grid, qHT = qHT1, oHT = oHT1, nsim=50, itermax=15, lrw=320000, decay =3, ncore = 12,
                      geo = list(me = 3.5, var = 1, geomod = "Exp", anis = c(90, 1), range = 40, nugget = 0))
   lire[[i]] = result
 }
@@ -1103,7 +1103,7 @@ for(i in 1:4){
   qHT_pred = qHT1[1:i]
   oHT_pred = oHT_reduced[1:i]
   result <- Finverse(grid =grid, qHT = qHT_pred, oHT = oHT_pred, nsim=50, itermax=10, lrw=320000,
-                     geo = geo)
+                     geo = geo,decay=1.3)
   lire[[i]] = result
 }
 # save the result.
@@ -1225,7 +1225,7 @@ qHT1 = blh_synthetic_range20$qHT
 oHT1 = blh_synthetic_range20$oHT
 oHT_noised <- oHT1
 for (i in 1:length(oHT_noised)){
-  noise = rnorm(n=nrow(oHT_noised[[i]]), mean=0, sd=0.05*sd(oHT_noised[[i]]$data))
+  noise = rnorm(n=nrow(oHT_noised[[i]]), mean=0, sd=0.00*sd(oHT_noised[[i]]$data))
   oHT_noised[[i]]$data <- oHT_noised[[i]]$data + noise
 }
 
@@ -1245,7 +1245,7 @@ lire = list()
 for(i in 1:4){
   qHT_pred = qHT1[1:i]
   oHT_pred = oHT_reduced[1:i]
-  result <- Finverse(grid =grid, qHT = qHT_pred, oHT = oHT_pred, nsim=50, itermax=15, lrw=320000,
+  result <- Finverse(grid =grid, qHT = qHT_pred, oHT = oHT_pred, nsim=50, itermax=20, lrw=320000,decay=1.5,
                      geo = geo)
   lire[[i]] = result
 }

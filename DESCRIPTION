@@ -13,7 +13,7 @@ RoxygenNote: 7.3.3
 Imports: 
     ggplot2,
     ReacTran,
-    multiApply,
+    parallel,
     ggpubr
 Suggests: 
     knitr,

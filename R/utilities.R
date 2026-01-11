@@ -3,6 +3,7 @@
 #' Based on package gstat, it generate correlated random field using Gaussian simulation.
 
 #' @param domain c(Nx,Ny,x1,x2,y1,y2) domain of the grid.
+#' @param grid generated grid information.
 #' @param geo geostatistical features: list(mean,variance,covarirance_function,anisotropy,range,nugget)
 #' @param nsim number of simulations.
 #' @return A data frame of three elements with grid showing generated grid (in x and y) and
