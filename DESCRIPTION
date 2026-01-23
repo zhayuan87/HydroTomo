@@ -14,7 +14,12 @@ Imports:
     ggplot2,
     ReacTran,
     parallel,
-    ggpubr
+    foreach,
+    doParallel,
+    ggpubr,
+    ggpp,
+    dplyr,
+    tibble
 Suggests: 
     knitr,
     rmarkdown,

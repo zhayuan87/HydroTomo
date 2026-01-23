@@ -176,12 +176,23 @@ inversePlot <- function(niterm=1,grid,iterdf,oHT,trueK=NULL,
   #https://www.roelpeters.be/how-to-add-a-regression-equation-and-r-squared-in-ggplot2/
   #https://rpkgs.datanovia.com/ggpubr/reference/stat_regline_equation.html
   require(ggpubr)
+  require(ggpp)
+  require(tibble)
+  xm = max(dfh[,1])
+  xn = min(dfh[,1])
+  ym = max(dfh[,2])
+  yn = min(dfh[,2])
+  x = xm- 0.15 *(xm - xn)
+  y = yn + 0.01*(ym - yn)
+  tb = tibble(round(statData(dfh),3))
+  df = tibble(x=x,y=y,tb=list(tb))
   p3 <- ggplot(dfh) +
     geom_errorbar(aes(x = trueh,ymin=simh-varh^0.5,ymax=simh+varh^0.5),width=0.02,color="gray")+
     geom_point(size=4,aes(x = trueh, y = simh,colour=ntest))+
     geom_smooth(method = "lm", aes(x = trueh, y = simh),se=FALSE) +
-    stat_regline_equation(aes(x = trueh, y = simh),label.y = -0.5) +
-    stat_cor( aes(x = trueh, y = simh),label.y = -1) +
+    stat_regline_equation(aes(x = trueh, y = simh),label.x = xn + 0.01*(xm - xn),label.y = ym- 0.01 *(ym - yn)) +
+    #stat_cor( aes(x = trueh, y = simh),label.y = -1) +
+    geom_table(data=df,aes(x=x,y=y,label=tb)) +
     labs(title = p3title, x = p3xlab, y = p3ylab)
 
   p1
@@ -191,11 +202,20 @@ inversePlot <- function(niterm=1,grid,iterdf,oHT,trueK=NULL,
   if(!is.null(trueK)){
     # scatterks <- data.frame(x=log(trueK$Tp),y=log(iterdf[[niterm]]$meanT))
     scatterks <- data.frame(x=log(trueK$Tp),y=iterdf[[niterm]]$meanT) # inverse directly store lnT. 2026.01.01
+    xm = max(scatterks[,1])
+    xn = min(scatterks[,1])
+    ym = max(scatterks[,2])
+    yn = min(scatterks[,2])
+    x = xm- 0.15 *(xm - xn)
+    y = yn + 0.01*(ym - yn)
+    tb = tibble(round(statData(scatterks),3))
+    df = tibble(x=x,y=y,tb=list(tb))
     p4 <- ggplot(scatterks) +
       aes(x,y) +
       geom_point(size=1)+
       geom_smooth(method = "lm", se=T) +
-      stat_regline_equation(label.y = -0.5)+
+      stat_regline_equation(label.x = xn + 0.01*(xm - xn),label.y = ym- 0.01 *(ym - yn))+
+      geom_table(data=df,aes(x=x,y=y,label=tb)) +
       labs(title = p4title, x = p4xlab, y = p4ylab)
   }
   if(!is.null(trueK))

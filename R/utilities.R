@@ -192,3 +192,21 @@ samData <- function(Oinf=data.frame(data=NA,x=10.5,y=10.5),
   Oinf$data = obs
   return(Oinf)
 }
+
+#' Calculate statistical values for simulated and true head or lnT.
+#' @export
+#' @param df data.frame given true and simulated values.
+#' @return data.frame given RMSE L1 R2
+
+statData <- function(df){
+  true = df[,1]
+  simu = df[,2]
+  rmse = sqrt(mean((true - simu)^2))
+  r = cor(true, simu)
+  l1 <- mean(abs(true - simu))
+  y_ = mean(true)
+  r2 =1 - sum((true - simu)^2)/sum((true - y_)^2)
+  # https://towardsdatascience.com/explaining-negative-r-squared-17894ca26321/
+  # we can treat it as nash coefficient, NSE.
+  return(data.frame(L1=l1,RMSE=rmse,r=r,NSE=r2))
+}
