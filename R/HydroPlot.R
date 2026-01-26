@@ -223,3 +223,42 @@ inversePlot <- function(niterm=1,grid,iterdf,oHT,trueK=NULL,
   else
     return(list(lnk=p1,varlnk=p2,headscatter=p3))
 }
+
+#' This plots the true and obs head.
+#' @export
+#' @param df the data.frame contains observed and simulated columns of drawdown.
+#' @param title the title of the plot.
+#' @param xlab the label of x axis.
+#' @param ylab the label of y axis.
+#' @examples
+#' df = data.frame(observed = rnorm(100), simulated = rnorm(
+#' 100))
+#' predictPlot(df)
+
+predictPlot <- function(df,
+                        title= "Drawdown scatter",
+                        xlab="Obs. Drawdown/m",
+                        ylab="Sim. Drawdown/m"
+    )
+{
+
+library(ggplot2)
+  require(ggpubr)
+  require(ggpp)
+  require(tibble)
+  xm = max(df$observed)
+  xn = min(df$observed)
+  ym = max(df$simulated)
+  yn = min(df$simulated)
+  x = xm- 0.15 *(xm - xn)
+  y = yn + 0.01*(ym - yn)
+  tb = tibble(round(statData(df[,-1]),3))
+  df1 = tibble(x=x,y=y,tb=list(tb))
+  ggplot(df, aes(x=observed, y=simulated)) +
+    geom_point(size=4) +
+    labs(title=title, x=xlab, y=ylab) +
+    geom_smooth(method = "lm", aes(x = observed, y = simulated),se=FALSE) +
+    stat_regline_equation(aes(x = observed, y = simulated),label.x = xn + 0.01*(xm - xn),label.y = ym- 0.01 *(ym - yn)) +
+    geom_table(data=df1,aes(x=x,y=y,label=tb)) +
+    theme_minimal()
+}

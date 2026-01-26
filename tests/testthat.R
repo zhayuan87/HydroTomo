@@ -9,4 +9,4 @@
 library(testthat)
 library(HydroTomo)
 
-test_package("HydroTomo")
+test_check("HydroTomo")
