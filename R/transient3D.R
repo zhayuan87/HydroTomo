@@ -66,8 +66,18 @@ diffusion3D_tr <- function(t, h, par) {
 
     # ---- pumping source terms  Q [L³/T] / cell volume -----------------------
     for (p in seq_along(Qp)) {
-      dY[Nxp[p], Nyp[p], Nzp[p]] <-
-        dY[Nxp[p], Nyp[p], Nzp[p]] - Qp[p] / dx / dy / dz
+      if (is.list(Nzp)) {
+        # well-screen pumping: distribute Qp evenly across z layers
+        nzp_vec <- Nzp[[p]]
+        nlay    <- length(nzp_vec)
+        for (iz in nzp_vec) {
+          dY[Nxp[p], Nyp[p], iz] <-
+            dY[Nxp[p], Nyp[p], iz] - Qp[p] / dx / dy / dz / nlay
+        }
+      } else {
+        dY[Nxp[p], Nyp[p], Nzp[p]] <-
+          dY[Nxp[p], Nyp[p], Nzp[p]] - Qp[p] / dx / dy / dz
+      }
     }
 
     # ---- divide by specific storage to obtain ∂h/∂t -------------------------
@@ -94,7 +104,8 @@ diffusion3D_tr <- function(t, h, par) {
 #'   vector.  Default \code{1e-4}.
 #' @param h0      initial head vector (length \code{n}).  Default: all zeros.
 #' @param Qinf    data frame with columns \code{Qp} L\eqn{^3}/T, \code{x},
-#'   \code{y}, \code{z}.
+#'   \code{y}, \code{z} (point pumping) or \code{Qp}, \code{x}, \code{y},
+#'   \code{z_top}, \code{z_bottom} (well-screen pumping).
 #' @param times   numeric vector of output times.  **Include all observation
 #'   times** to allow exact sampling via \code{\link{samData3DTr}}.
 #' @param lrw     real work array length.  Default 20000000; increase for
@@ -142,8 +153,27 @@ Ftransient3dsim <- function(domain = c(40, 40, 10, 0, 40, 0, 40, 0, 10),
   Ssp <- if (length(Ss) == 1L) rep(Ss, n) else Ss
   if (is.null(h0)) h0 <- rep(0, n)
 
-  Qseq <- getQseq3D(grid = grid, Qinf = Qinf)
-  Nxp  <- Qseq$Nxp; Nyp <- Qseq$Nyp; Nzp <- Qseq$Nzp; Qp <- Qinf$Qp
+  # ---- detect well-screen pumping (z_top / z_bottom) vs point pumping (z) ----
+  if (all(c('z_top', 'z_bottom') %in% names(Qinf))) {
+    # well-screen pumping: map to z-index vectors
+    Nxp <- integer(nrow(Qinf)); Nyp <- integer(nrow(Qinf))
+    Nzp <- vector('list', nrow(Qinf))
+    for (i in seq_len(nrow(Qinf))) {
+      Nxp[i] <- which.min(abs(Qinf$x[i] - grid$xmid))
+      Nyp[i] <- which.min(abs(Qinf$y[i] - grid$ymid))
+      z_lo   <- min(Qinf$z_top[i], Qinf$z_bottom[i])
+      z_hi   <- max(Qinf$z_top[i], Qinf$z_bottom[i])
+      iz_vec <- which(grid$zmid >= z_lo & grid$zmid <= z_hi)
+      if (length(iz_vec) == 0) {
+        iz_vec <- which.min(abs(grid$zmid - mean(c(z_lo, z_hi))))
+      }
+      Nzp[[i]] <- iz_vec
+    }
+  } else {
+    Qseq <- getQseq3D(grid = grid, Qinf = Qinf)
+    Nxp  <- Qseq$Nxp; Nyp <- Qseq$Nyp; Nzp <- Qseq$Nzp
+  }
+  Qp <- Qinf$Qp
 
   para <- list(dx = dx, dy = dy, dz = dz,
                nx = nx, ny = ny, nz = nz,
@@ -200,6 +230,51 @@ samData3DTr <- function(Oinf,
       out_mat[it, nelem + 1L]     # +1 offset: col 1 is time
     },
     Oinf_elem$nelem,
+    Oinf$time
+  )
+  Oinf
+}
+
+
+#' Sample transient 3D head values at well-screen intervals
+#'
+#' Transient counterpart of \code{\link{samData3DScreen}}.  For each
+#' observation well with a vertical screen defined by \code{z_top} and
+#' \code{z_bottom}, computes the arithmetic mean of simulated heads at the
+#' requested observation time over all grid cells within the screen interval.
+#'
+#' @param Oinf      data frame with columns \code{data}, \code{x}, \code{y},
+#'   \code{z_top}, \code{z_bottom}, \code{time}.
+#' @param grid      grid from \code{\link{GenGrid3D}}.
+#' @param result_tr list returned by \code{\link{Ftransient3dsim}}.
+#' @return \code{Oinf} with the \code{data} column filled with
+#'   interval-averaged heads.
+#' @export
+#' @examples
+#' grid3d <- GenGrid3D(c(15, 15, 5, 0, 15, 0, 15, 0, 5))
+#' times  <- c(0, 10, 50, 100)
+#' res3d  <- Ftransient3dsim(grid = grid3d, times = times)
+#' Oinf   <- data.frame(data = NA,
+#'                      x      = c(5.5, 10.5),
+#'                      y      = c(7.5,  7.5),
+#'                      z_top  = c(1.0,  1.0),
+#'                      z_bottom = c(4.0, 4.0),
+#'                      time   = c(50, 100))
+#' Oinf   <- samData3DTrScreen(Oinf = Oinf, grid = grid3d, result_tr = res3d)
+samData3DTrScreen <- function(Oinf,
+                              grid,
+                              result_tr) {
+
+  out_mat   <- result_tr$out      # nt × (n+1); col 1 = time
+  sim_times <- out_mat[, 1]
+  Oinf_elem <- getOelem3DScreen(grid = grid, Oinf = Oinf)
+
+  Oinf$data <- mapply(
+    function(nelem_vec, t_obs) {
+      it <- which.min(abs(sim_times - t_obs))
+      mean(out_mat[it, nelem_vec + 1L])
+    },
+    Oinf_elem$nelem_list,
     Oinf$time
   )
   Oinf

@@ -31,7 +31,8 @@ Finverse3DTr(
 if \code{NULL}.}
 
 \item{qHT}{list of pumping test data frames with columns
-\code{Qp, x, y, z}.}
+\code{Qp, x, y, z_top, z_bottom} (well-screen pumping) or
+\code{Qp, x, y, z} (point pumping).}
 
 \item{nsim}{ensemble size (default 50; use ~20 for quick tests).}
 

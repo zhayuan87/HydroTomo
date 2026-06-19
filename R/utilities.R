@@ -413,6 +413,102 @@ samData3D <- function(Oinf = data.frame(data = NA, x = 10.5, y = 10.5, z = 5.5),
 }
 
 
+# ==============================================================================
+# 3D Well-Screen (vertical interval) support
+# ==============================================================================
+
+#' Map observation well-screen intervals to flat element numbers (3D)
+#'
+#' For wells with a vertical screen (filter) section, this function maps a
+#' \code{(x, y)} location to the nearest grid cell in the horizontal plane and
+#' then returns all flat element indices whose z-midpoints lie within
+#' \code{[z_top, z_bottom]}.  The arithmetic mean of the heads over those
+#' elements is the well-screen head.
+#'
+#' @param grid grid from \code{\link{GenGrid3D}}.
+#' @param Oinf a data frame with columns \code{data}, \code{x}, \code{y},
+#'   \code{z_top}, \code{z_bottom}.  \code{z_top} is the top of the screen
+#'   (higher z value; e.g. shallower depth) and \code{z_bottom} is the bottom
+#'   of the screen (lower z value; deeper).  The function works for any
+#'   ordering as long as the range is meaningful.
+#' @return \code{Oinf} with an additional column \code{nelem_list}, a list-column
+#'   where each entry is an integer vector of flat element numbers within the
+#'   screen interval.
+#' @export
+#' @examples
+#' grid3d <- GenGrid3D(c(15, 15, 5, 0, 15, 0, 15, 0, 5))
+#' Oinf   <- data.frame(data=NA, x=10, y=10, z_top=1, z_bottom=4)
+#' getOelem3DScreen(grid=grid3d, Oinf=Oinf)
+getOelem3DScreen <- function(grid,
+                             Oinf = data.frame(data=NA, x=10, y=10,
+                                               z_top=1, z_bottom=4)) {
+  if (!all(c('z_top', 'z_bottom') %in% names(Oinf))) {
+    stop("Oinf must contain columns 'z_top' and 'z_bottom' for screen intervals")
+  }
+
+  No  <- nrow(Oinf)
+  nx  <- grid$nx; ny <- grid$ny
+  zmid <- grid$zmid
+
+  Nxo <- integer(No); Nyo <- integer(No)
+  for (i in seq_len(No)) {
+    Nxo[i] <- which.min(abs(Oinf$x[i] - grid$xmid))
+    Nyo[i] <- which.min(abs(Oinf$y[i] - grid$ymid))
+  }
+
+  # For each observation row, find all z-layers whose midpoint is inside [z_top, z_bottom]
+  Oinf$nelem_list <- vector('list', No)
+  for (i in seq_len(No)) {
+    z_lo   <- min(Oinf$z_top[i], Oinf$z_bottom[i])
+    z_hi   <- max(Oinf$z_top[i], Oinf$z_bottom[i])
+    iz_vec <- which(zmid >= z_lo & zmid <= z_hi)
+
+    if (length(iz_vec) == 0) {
+      # fallback: nearest single z layer
+      iz_vec <- which.min(abs(zmid - mean(c(z_lo, z_hi))))
+    }
+
+    nelem_vec <- (iz_vec - 1L) * nx * ny +
+                 (Nyo[i] - 1L) * nx +
+                 Nxo[i]
+    Oinf$nelem_list[[i]] <- nelem_vec
+  }
+
+  Oinf
+}
+
+
+#' Sample steady-state 3D head values at well-screen intervals
+#'
+#' For each observation well with a vertical screen defined by \code{z_top}
+#' and \code{z_bottom}, this function computes the arithmetic mean of simulated
+#' heads over all grid cells whose z-midpoint falls within the screen interval.
+#'
+#' @param Oinf a data frame with columns \code{data}, \code{x}, \code{y},
+#'   \code{z_top}, \code{z_bottom}.
+#' @param grid grid from \code{\link{GenGrid3D}}.
+#' @param h    the head vector from \code{Fsteady3dsim()$solution} (length
+#'   \code{n}).
+#' @return \code{Oinf} with the \code{data} column filled with interval-averaged
+#'   heads.
+#' @export
+#' @examples
+#' grid3d <- GenGrid3D(c(15, 15, 5, 0, 15, 0, 15, 0, 5))
+#' Oinf   <- data.frame(data=NA, x=10, y=10, z_top=1, z_bottom=4)
+#' h      <- rnorm(grid3d$n)
+#' samData3DScreen(Oinf=Oinf, grid=grid3d, h=h)
+samData3DScreen <- function(Oinf = data.frame(data=NA, x=10, y=10,
+                                              z_top=1, z_bottom=4),
+                            grid,
+                            h) {
+  Oinf <- getOelem3DScreen(grid = grid, Oinf = Oinf)
+  Oinf$data <- vapply(Oinf$nelem_list,
+                      function(idx) mean(h[idx]),
+                      numeric(1))
+  Oinf
+}
+
+
 #' Sample simulated head values at observation well locations (2D)
 #'
 #' Extracts simulated head values from a forward simulation result at the

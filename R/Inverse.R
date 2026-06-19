@@ -861,7 +861,8 @@ samHTmcPar3D <- function(grid,
 #' @param grid    grid from \code{GenGrid3D()}; generated from \code{domain}
 #'   if \code{NULL}.
 #' @param qHT     list of pumping test data frames with columns
-#'   \code{Qp, x, y, z}.
+#'   \code{Qp, x, y, z_top, z_bottom} (well-screen pumping) or
+#'   \code{Qp, x, y, z} (point pumping).
 #' @param nsim    ensemble size (default 50; use ~20 for quick tests).
 #' @param itermax maximum iterations (set to 1 for initial testing).
 #' @param varmeanTmax  convergence threshold on variance of mean ln(K).
@@ -1386,7 +1387,8 @@ samHTmcPar3DTr <- function(grid,
 #' @param grid    grid from \code{GenGrid3D()}; generated from \code{domain}
 #'   if \code{NULL}.
 #' @param qHT     list of pumping test data frames with columns
-#'   \code{Qp, x, y, z}.
+#'   \code{Qp, x, y, z_top, z_bottom} (well-screen pumping) or
+#'   \code{Qp, x, y, z} (point pumping).
 #' @param nsim    ensemble size (default 50; use ~20 for quick tests).
 #' @param itermax maximum iterations (set to 1 for initial testing).
 #' @param varmeanTmax  convergence threshold on variance of mean ln(K).
@@ -1502,6 +1504,282 @@ Finverse3DTr <- function(
     covh1 <- covh
     diag(covh1) <- rep((1 + mul) * max(diag(covh)), nobs)
     a <- solve(covh1, covhk)   # nobs × n
+
+    for (i in seq_len(nsim)) {
+      Knew[, i] <- Knew[, i] * exp(t(a) %*% (trueobsh - obsh[i, ]))
+    }
+
+    msg <- paste('niter =', niter,
+                 'varmeanT =', round(varmeanT, 4),
+                 'rmse =', round(rmse, 4),
+                 'l2 =', round(l2, 4),
+                 'l1 =', round(l1, 4))
+    print(msg)
+
+    iterdf[[niter]] <- list(meanT    = as.vector(meanT),
+                            varT     = as.vector(varT),
+                            meanobsh = meanobsh,
+                            varobsh  = varobsh)
+
+    if (niter == 1) {
+      print("--- time for one iteration ---")
+      print(difftime(Sys.time(), startTime))
+    }
+
+    niter <- niter + 1
+    mul   <- mul / decay
+  }
+
+  print("--- total time ---")
+  print(difftime(Sys.time(), startTime))
+  return(iterdf)
+}
+
+
+# ==============================================================================
+# 3D Transient HT — Well-Screen (vertical interval) Inverse Functions
+# ==============================================================================
+
+#' Run forward simulations for one K field — 3D transient well-screen version
+#'
+#' Like \code{\link{samHT3Dtr}} but for wells with vertical screens.
+#' Calls \code{\link{Ftransient3dsim}} and samples interval-averaged heads
+#' via \code{\link{samData3DTrScreen}}.
+#'
+#' @param grid   grid from \code{GenGrid3D()}.
+#' @param KK     length-\code{n} vector of hydraulic conductivity K \code{[L/T]}.
+#' @param Ss     specific storage Ss \code{[1/L]} — scalar or length-\code{n}
+#'   vector.
+#' @param qHT    list of pumping test data frames, each with columns
+#'   \code{Qp, x, y, z_top, z_bottom} (well-screen pumping) or
+#'   \code{Qp, x, y, z} (point pumping).
+#' @param oHT    list of observation data frames, each with columns
+#'   \code{data, x, y, z_top, z_bottom, time}.
+#' @param times  numeric vector of output times for the ODE solver.
+#' @param lrw    real work array length; default 20000000.
+#' @param simplify if \code{TRUE} return a plain vector; \code{FALSE} returns
+#'   updated \code{oHT}.
+#' @return vector of interval-averaged drawdown values (when \code{simplify = TRUE}).
+#' @export
+#' @examples
+#' grid3d <- GenGrid3D(c(15, 15, 5, 0, 15, 0, 15, 0, 5))
+#' Qinf   <- data.frame(Qp=10, x=7.5, y=7.5, z_top=2, z_bottom=3)
+#' Oinf   <- data.frame(data=NA, x=c(5,10), y=c(7.5,7.5),
+#'                      z_top=c(1,1), z_bottom=c(4,4), time=c(0.5, 0.5))
+#' times  <- seq(0, 1, by=0.05)
+#' da     <- samHT3DtrScreen(grid=grid3d, KK=0.1, Ss=1e-4,
+#'                           qHT=list(Qinf), oHT=list(Oinf), times=times)
+samHT3DtrScreen <- function(grid,
+                            KK       = 0.1,
+                            Ss       = 1e-4,
+                            qHT      = list(data.frame(Qp=10, x=7.5, y=7.5,
+                                                      z_top=2, z_bottom=3)),
+                            oHT      = list(data.frame(data=NA, x=5, y=5,
+                                                      z_top=1, z_bottom=4, time=50)),
+                            times    = seq(0, 100, by=10),
+                            lrw      = 20000000,
+                            simplify = TRUE) {
+
+  nHT <- length(qHT)
+  for (i in seq_len(nHT)) {
+    qinf <- qHT[[i]]
+    oinf <- oHT[[i]]
+    res  <- Ftransient3dsim(grid = grid, KK = KK, Ss = Ss,
+                            Qinf = qinf, times = times, lrw = lrw)
+    oinf <- samData3DTrScreen(Oinf = oinf, grid = grid, result_tr = res)
+    oHT[[i]] <- oinf[, c('data', 'x', 'y', 'z_top', 'z_bottom', 'time')]
+  }
+  if (simplify) {
+    oHTdf <- dplyr::bind_rows(oHT, .id = 'id')
+    return(oHTdf$data)
+  } else {
+    return(oHT)
+  }
+}
+
+
+#' Parallel MC forward runs for 3D transient HT — well-screen version (ensemble)
+#'
+#' Like \code{\link{samHTmcPar3DTr}} but uses \code{\link{samHT3DtrScreen}}
+#' for interval-averaged well-screen sampling.
+#'
+#' @param grid   grid from \code{GenGrid3D()}.
+#' @param KK     \code{n × nsim} matrix of K realisations.
+#' @param Ss     specific storage Ss \code{[1/L]} — scalar or length-\code{n}
+#'   vector.
+#' @param qHT    list of pumping test data frames (columns
+#'   \code{Qp, x, y, z_top, z_bottom} for well-screen pumping, or
+#'   \code{Qp, x, y, z} for point pumping).
+#' @param oHT    list of observation data frames (columns
+#'   \code{data, x, y, z_top, z_bottom, time}).
+#' @param times  numeric vector of output times for the ODE solver.
+#' @param lrw    real work array length; default 20000000.
+#' @param ncore  number of parallel cores.
+#' @return \code{nsim × nobs} matrix of interval-averaged heads.
+#' @export
+#' @examples
+#' grid3d <- GenGrid3D(c(15,15,5,0,15,0,15,0,5))
+#' KKmat  <- random3d(nsim=5, grid=grid3d)
+#' KKmat  <- as.matrix(KKmat[,-c(1,2,3)])
+#' Qinf   <- data.frame(Qp=10, x=7.5, y=7.5, z_top=2, z_bottom=3)
+#' Oinf   <- data.frame(data=NA, x=c(5,10), y=c(7.5,7.5),
+#'                      z_top=c(1,1), z_bottom=c(4,4), time=c(0.5, 0.5))
+#' times  <- seq(0, 1, by=0.05)
+#' da     <- samHTmcPar3DTrScreen(grid=grid3d, KK=KKmat, Ss=1e-4,
+#'                                qHT=list(Qinf), oHT=list(Oinf),
+#'                                times=times, ncore=2)
+samHTmcPar3DTrScreen <- function(grid,
+                                 KK    = 0.1,
+                                 Ss    = 1e-4,
+                                 qHT   = list(data.frame(Qp=10, x=7.5, y=7.5,
+                                                         z_top=2, z_bottom=3)),
+                                 oHT   = list(data.frame(data=NA, x=5, y=5,
+                                                        z_top=1, z_bottom=4, time=50)),
+                                 times = seq(0, 100, by=10),
+                                 lrw   = 20000000,
+                                 ncore = 4) {
+
+  library('foreach')
+  library('doParallel')
+  registerDoParallel(cores = ncore)
+
+  nsim <- ncol(KK)
+  x <- foreach(i = 1:nsim, .combine = rbind) %dopar% {
+    HydroTomo::samHT3DtrScreen(grid = grid, KK = KK[, i], Ss = Ss,
+                               qHT = qHT, oHT = oHT, times = times, lrw = lrw)
+  }
+
+  stopImplicitCluster()
+  return(x)
+}
+
+
+#' 3D Transient HT ensemble inverse — well-screen (vertical interval) version
+#'
+#' Like \code{\link{Finverse3DTr}} but for wells with vertical screens
+#' (filter sections).  Observation wells are defined by \code{(x, y)} and a
+#' screen interval \code{[z_top, z_bottom]}.  The forward solver
+#' \code{\link{Ftransient3dsim}} computes full 3D transient heads, and
+#' \code{\link{samData3DTrScreen}} averages heads over all grid cells within
+#' the screen interval.
+#'
+#' @param domain  9-element vector \code{c(nx, ny, nz, x1, x2, y1, y2, z1, z2)}.
+#' @param grid    grid from \code{GenGrid3D()}; generated from \code{domain}
+#'   if \code{NULL}.
+#' @param qHT     list of pumping test data frames with columns
+#'   \code{Qp, x, y, z_top, z_bottom} (well-screen pumping) or
+#'   \code{Qp, x, y, z} (point pumping).
+#' @param nsim    ensemble size (default 50).
+#' @param itermax maximum iterations.
+#' @param varmeanTmax  convergence threshold on variance of mean ln(K).
+#' @param rmsemin minimum RMSE stopping criterion.
+#' @param mul     stabiliser (default 1.0).
+#' @param decay   stabiliser decay per iteration (default 1.05).
+#' @param oHT     list of observation data frames with columns
+#'   \code{data, x, y, z_top, z_bottom, time}.
+#' @param Ss      specific storage Ss \code{[1/L]} — scalar or length-\code{n}
+#'   vector.
+#' @param times   numeric vector of output times for the ODE solver.
+#' @param lrw     real work array length for \code{ode.3D} (default 20000000).
+#' @param ncore   number of parallel cores (default 4).
+#' @param geo     prior geostatistical parameters (list).
+#' @return list of per-iteration results.
+#' @export
+#' @examples
+#' # --- small synthetic test with well screens ---
+#' domain3d <- c(15, 15, 5, 0, 15, 0, 15, 0, 5)
+#' grid3d   <- GenGrid3D(domain3d)
+#' set.seed(42)
+#' trueK3d  <- random3d(nsim=1, grid=grid3d)
+#' Qinf3d   <- data.frame(Qp=10, x=7.5, y=7.5, z_top=2, z_bottom=3)
+#' qHT3d    <- list(test1 = Qinf3d)
+#' times    <- seq(0, 1, by=0.05)
+#' res3d    <- Ftransient3dsim(grid=grid3d, KK=trueK3d$Kp, Ss=1e-4,
+#'                             Qinf=Qinf3d, times=times)
+#' loc      <- expand.grid(x=c(3,6,9,12), y=c(3,6,9,12))
+#' Oinf3d   <- data.frame(data=NA, x=loc$x, y=loc$y,
+#'                        z_top=1, z_bottom=4, time=0.5)
+#' Oinf3d   <- samData3DTrScreen(Oinf=Oinf3d, grid=grid3d, result_tr=res3d)
+#' oHT3d    <- list(test1 = Oinf3d)
+#' result3d <- Finverse3DTrScreen(grid=grid3d, qHT=qHT3d, oHT=oHT3d,
+#'                                Ss=1e-4, times=times, nsim=20, itermax=1, ncore=2)
+Finverse3DTrScreen <- function(
+    domain      = c(15, 15, 5, 0, 15, 0, 15, 0, 5),
+    grid        = NULL,
+    qHT         = list(data.frame(Qp=10, x=7.5, y=7.5, z_top=2, z_bottom=3)),
+    nsim        = 50,
+    itermax     = 5,
+    varmeanTmax = 5,
+    rmsemin     = 0,
+    mul         = 1.0,
+    decay       = 1.05,
+    oHT         = list(data.frame(data=-1, x=5, y=5,
+                                 z_top=1, z_bottom=4, time=50)),
+    Ss          = 1e-4,
+    times       = seq(0, 100, by=10),
+    lrw         = 20000000,
+    ncore       = 4,
+    geo         = list(me=0, var=1, geomod="Exp",
+                       range=10, nugget=0,
+                       anis=c(0, 0, 0, 1, 1))) {
+
+  set.seed(200)
+  startTime <- Sys.time()
+
+  if (is.null(grid)) grid <- GenGrid3D(domain)
+
+  nHT <- length(qHT)
+
+  # ---- extract observation data ----------------------------------------------
+  trueobshHT <- list()
+  for (i in seq_len(nHT)) {
+    oinf            <- oHT[[i]]
+    trueobshHT[[i]] <- oinf$data
+  }
+  trueobsh <- unlist(trueobshHT)
+  nobs     <- length(trueobsh)
+
+  # ---- initial ensemble ------------------------------------------------------
+  yy   <- random3d(nsim = nsim, grid = grid, geo = geo)
+  Knew <- as.matrix(yy[, -c(1, 2, 3)])
+
+  # ---- iteration loop --------------------------------------------------------
+  niter    <- 1
+  varmeanT <- 0
+  rmse     <- 1e10
+  msgdf    <- data.frame(niter = niter, varmeanT = varmeanT, rmse = rmse)
+  iterdf   <- list()
+
+  while (niter <= itermax & varmeanT < varmeanTmax & rmse > rmsemin) {
+
+    varT     <- apply(log(Knew), 1, var)
+    meanT    <- apply(log(Knew), 1, mean)
+    varmeanT <- var(meanT)
+
+    # parallel transient forward runs — screen-averaged
+    obsh <- samHTmcPar3DTrScreen(grid  = grid,
+                                 KK    = Knew,
+                                 Ss    = Ss,
+                                 qHT   = qHT,
+                                 oHT   = oHT,
+                                 times = times,
+                                 lrw   = lrw,
+                                 ncore = ncore)
+
+    # ---- statistics ----------------------------------------------------------
+    varobsh  <- apply(obsh, 2, var)
+    meanobsh <- apply(obsh, 2, mean)
+    weigs    <- 1 / varobsh / sum(1 / varobsh)
+    rmse     <- mean((trueobsh - meanobsh)^2 * weigs)^0.5
+    l2       <- mean((trueobsh - meanobsh)^2)^0.5
+    l1       <- mean(abs(trueobsh - meanobsh))
+
+    # ---- Bayesian update -----------------------------------------------------
+    covh  <- cov(obsh)
+    covhk <- cov(obsh, t(log(Knew)))
+    covh1 <- covh
+    diag(covh1) <- rep((1 + mul) * max(diag(covh)), nobs)
+    a <- solve(covh1, covhk)
 
     for (i in seq_len(nsim)) {
       Knew[, i] <- Knew[, i] * exp(t(a) %*% (trueobsh - obsh[i, ]))

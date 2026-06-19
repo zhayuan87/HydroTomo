@@ -23,7 +23,8 @@ length-\code{n} vector (one value per cell, ordered as
 \code{expand.grid(x, y, z)}).}
 
 \item{Qinf}{a data frame with columns \code{Qp} L\eqn{^3}/T, \code{x},
-\code{y}, \code{z} giving pumping rate and location of each pumping well.
+\code{y}, \code{z} (point pumping) or \code{Qp}, \code{x}, \code{y},
+\code{z_top}, \code{z_bottom} (well-screen pumping).
 Positive \code{Qp} = extraction.}
 
 \item{lrw}{length of the real work array passed to the solver.  Increase

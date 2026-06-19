@@ -31,7 +31,8 @@ vector.  Default \code{1e-4}.}
 \item{h0}{initial head vector (length \code{n}).  Default: all zeros.}
 
 \item{Qinf}{data frame with columns \code{Qp} L\eqn{^3}/T, \code{x},
-\code{y}, \code{z}.}
+\code{y}, \code{z} (point pumping) or \code{Qp}, \code{x}, \code{y},
+\code{z_top}, \code{z_bottom} (well-screen pumping).}
 
 \item{times}{numeric vector of output times.  \strong{Include all observation
 times} to allow exact sampling via \code{\link{samData3DTr}}.}

@@ -24,7 +24,8 @@
 #'   length-\code{n} vector (one value per cell, ordered as
 #'   \code{expand.grid(x, y, z)}).
 #' @param Qinf   a data frame with columns \code{Qp} L\eqn{^3}/T, \code{x},
-#'   \code{y}, \code{z} giving pumping rate and location of each pumping well.
+#'   \code{y}, \code{z} (point pumping) or \code{Qp}, \code{x}, \code{y},
+#'   \code{z_top}, \code{z_bottom} (well-screen pumping).
 #'   Positive \code{Qp} = extraction.
 #' @param lrw    length of the real work array passed to the solver.  Increase
 #'   for larger grids (rule of thumb: \eqn{\geq 100 \times n}).
@@ -58,9 +59,27 @@ Fsteady3dsim <- function(domain = c(40, 40, 10, 0, 40, 0, 40, 0, 10),
   Kp <- if (length(KK) == 1L) rep(KK, n) else KK
   h0 <- rep(0, n)   # initial guess (all zero drawdown)
 
-  Qseq <- getQseq3D(grid = grid, Qinf = Qinf)
-  Nxp  <- Qseq$Nxp; Nyp <- Qseq$Nyp; Nzp <- Qseq$Nzp
-  Qp   <- Qinf$Qp
+  # ---- detect well-screen pumping (z_top / z_bottom) vs point pumping (z) ----
+  if (all(c('z_top', 'z_bottom') %in% names(Qinf))) {
+    # well-screen pumping: map to z-index vectors
+    Nxp <- integer(nrow(Qinf)); Nyp <- integer(nrow(Qinf))
+    Nzp <- vector('list', nrow(Qinf))
+    for (i in seq_len(nrow(Qinf))) {
+      Nxp[i] <- which.min(abs(Qinf$x[i] - grid$xmid))
+      Nyp[i] <- which.min(abs(Qinf$y[i] - grid$ymid))
+      z_lo   <- min(Qinf$z_top[i], Qinf$z_bottom[i])
+      z_hi   <- max(Qinf$z_top[i], Qinf$z_bottom[i])
+      iz_vec <- which(grid$zmid >= z_lo & grid$zmid <= z_hi)
+      if (length(iz_vec) == 0) {
+        iz_vec <- which.min(abs(grid$zmid - mean(c(z_lo, z_hi))))
+      }
+      Nzp[[i]] <- iz_vec
+    }
+  } else {
+    Qseq <- getQseq3D(grid = grid, Qinf = Qinf)
+    Nxp  <- Qseq$Nxp; Nyp <- Qseq$Nyp; Nzp <- Qseq$Nzp
+  }
+  Qp <- Qinf$Qp
 
   para <- list(dx = dx, dy = dy, dz = dz,
                nx = nx, ny = ny, nz = nz,
@@ -128,8 +147,18 @@ diffusion3D_GW <- function(t, h, par) {
 
     # Pumping source terms: Qp [L³/T] distributed over one cell volume
     for (p in seq_along(Qp)) {
-      dY[Nxp[p], Nyp[p], Nzp[p]] <-
-        dY[Nxp[p], Nyp[p], Nzp[p]] - Qp[p] / dx / dy / dz
+      if (is.list(Nzp)) {
+        # well-screen pumping: distribute Qp evenly across z layers
+        nzp_vec <- Nzp[[p]]
+        nlay    <- length(nzp_vec)
+        for (iz in nzp_vec) {
+          dY[Nxp[p], Nyp[p], iz] <-
+            dY[Nxp[p], Nyp[p], iz] - Qp[p] / dx / dy / dz / nlay
+        }
+      } else {
+        dY[Nxp[p], Nyp[p], Nzp[p]] <-
+          dY[Nxp[p], Nyp[p], Nzp[p]] - Qp[p] / dx / dy / dz
+      }
     }
 
     list(as.vector(dY))
