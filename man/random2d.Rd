@@ -2,7 +2,7 @@
 % Please edit documentation in R/utilities.R
 \name{random2d}
 \alias{random2d}
-\title{Generate 2-D random field of hydraulic parameters}
+\title{Generate 2-D random field of transmissivity}
 \usage{
 random2d(
   domain = c(40, 40, 0, 40, 0, 40),
@@ -12,20 +12,41 @@ random2d(
 )
 }
 \arguments{
-\item{domain}{c(Nx,Ny,x1,x2,y1,y2) domain of the grid.}
+\item{domain}{a 6-element vector \code{c(nx, ny, x1, x2, y1, y2)}.  \code{nx}
+and \code{ny} are cell counts; \code{x1:x2} and \code{y1:y2} are domain
+extents \code{[L]}.}
 
-\item{grid}{generated grid information.}
+\item{grid}{grid list from \code{GenGrid()}; generated from \code{domain} if
+\code{NULL}.}
 
-\item{geo}{geostatistical features: list(mean,variance,covarirance_function,anisotropy,range,nugget)}
+\item{geo}{geostatistical parameters as a named list:
+\describe{
+\item{me}{mean of ln(T), default 0}
+\item{var}{variance of ln(T), default 1}
+\item{geomod}{variogram model type, e.g. \code{"Exp"}, \code{"Gau"},
+\code{"Sph"}; default \code{"Exp"}}
+\item{anis}{2D anisotropy: 2-element vector \code{c(azimuth, ratio)}.
+\code{azimuth} = anisotropy direction (degrees clockwise from north),
+\code{ratio} = range ratio in the minor direction (1 = isotropic).
+Default \code{c(90, 1)}.}
+\item{range}{correlation range \code{[L]}, default 30}
+\item{nugget}{nugget variance, default 0}
+}}
 
-\item{nsim}{number of simulations.}
+\item{nsim}{number of realisations to generate (default 1).}
 }
 \value{
-A data frame of three elements with grid showing generated grid (in x and y) and
-parameter values.
+A data frame with columns \code{x}, \code{y} and \code{nsim} columns
+of \eqn{T} \code{[L\eqn{^2}/T]} values named \code{sim1}, \code{sim2}, … (or a
+single column \code{Tp} when \code{nsim = 1}).
 }
 \description{
-Based on package gstat, it generate correlated random field using Gaussian simulation.
+Based on package \pkg{gstat}, generates a spatially correlated 2D random field
+of log-transmissivity \eqn{\ln T} using unconditional Gaussian simulation,
+then returns \eqn{T = \exp(\ln T)}.  The variogram model supports exponential
+(\code{"Exp"}), Gaussian (\code{"Gau"}), spherical (\code{"Sph"}), and other
+\code{gstat} model types.  Anisotropy is specified by the azimuth angle
+(degrees clockwise from north) and the anisotropy ratio.
 }
 \examples{
 TT= random2d()

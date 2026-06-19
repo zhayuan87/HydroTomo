@@ -3,23 +3,26 @@
 \docType{data}
 \name{dfl_ss_unique}
 \alias{dfl_ss_unique}
-\title{The observation wells information conducted in Bulanghe Basin, China by Xi'an Geological Survey.}
+\title{Observation well data from Bulanghe Basin, China}
 \format{
-A data frame with 30 rows and 5 variables:
+A data frame with 30 rows and 7 variables:
 \describe{
-\item{obs_well}{character, the observation well name of the 30 wells}
-\item{X}{numeric, the x coordinate of the observation well in meter.}
-\item{Y}{numeric, the y coordinate of the observation well in meter.}
-\item{value}{numeric, the steady-state drawdown value in centi-meter.}
-\item{pumping_test}{character, the pumping test name corresponding to the observation well.}
-\item{element_number}{integer, the default element number in a 80\emph{80 element.}
-\item{element_pump}{integer, the default element number for pumping well in a 80}80 element.}
+\item{obs_well}{character, the observation well name.}
+\item{X}{numeric, the x coordinate of the observation well \code{[L]}.}
+\item{Y}{numeric, the y coordinate of the observation well \code{[L]}.}
+\item{value}{numeric, the steady-state drawdown \code{[L]} (originally in cm;
+convert to m by dividing by 100).}
+\item{pumping_test}{character, the corresponding pumping test name.}
+\item{element_number}{integer, the grid element number in an 80×80 grid.}
+\item{element_pump}{integer, the grid element number for the pumping well
+in an 80×80 grid.}
 }
 }
 \usage{
 dfl_ss_unique
 }
 \description{
-The observation wells information conducted in Bulanghe Basin, China by Xi'an Geological Survey.
+Steady-state drawdown measurements at 30 observation wells during pumping
+tests at the Bulanghe Basin, conducted by the Xi'an Geological Survey, China.
 }
 \keyword{datasets}

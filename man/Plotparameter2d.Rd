@@ -2,7 +2,7 @@
 % Please edit documentation in R/HydroPlot.R
 \name{Plotparameter2d}
 \alias{Plotparameter2d}
-\title{Plot the generated T distribution from random2d.}
+\title{Plot 2D transmissivity field}
 \usage{
 Plotparameter2d(
   TT,
@@ -19,33 +19,35 @@ Plotparameter2d(
 )
 }
 \arguments{
-\item{TT}{a data.frame, the result of Fsteady2dsim (x,y,transsimisivity).}
+\item{TT}{a data frame returned by \code{random2d()} (columns \code{x},
+\code{y}, \code{Tp} or \code{sim1}, …).}
 
-\item{palette}{a string, the palette to use. could be magma, inferno, plasma, viridis, cividis, rocket, marko, turbo, or simply A-G.}
+\item{palette}{a string, the \code{viridis} palette option to use:
+\code{"magma"}, \code{"inferno"}, \code{"plasma"}, \code{"viridis"}
+(default), \code{"cividis"}, \code{"rocket"}, \code{"mako"}, \code{"turbo"}.}
 
-\item{plotshow}{a logical value, if TRUE, the plot will be shown.}
+\item{plotshow}{a logical value; if \code{TRUE} (default), the plot is
+displayed.}
 
-\item{plotfile}{a string, the path to save the plot.}
+\item{plotfile}{optional file path for saving as PDF.}
 
-\item{plotwidth}{a numeric value, the width of the plot.}
+\item{plotwidth, plotheight}{plot dimensions in inches.}
 
-\item{plotheight}{a numeric value, the height of the plot.}
+\item{iflog}{logical; if \code{TRUE}, plot \eqn{\ln T} instead of \eqn{T}.}
 
-\item{iflog}{a logical value, if true,  use log(T), else using T.}
+\item{title}{plot title.  Automatically set if \code{NULL}.}
 
-\item{title}{a string, the title of the plot.}
+\item{z}{colour-bar label.  Automatically set if \code{NULL}.}
 
-\item{z}{a string, the label of z axis.}
-
-\item{xlab}{a string, the label of x axis.}
-
-\item{ylab}{a string, the label of y axis.}
+\item{xlab, ylab}{axis labels (default \code{"X/m"}, \code{"Y/m"}).}
 }
 \value{
-a plot showing contour.
+A \code{ggplot} object.
 }
 \description{
-Plot the generated T distribution from random2d.
+Creates a filled contour plot (using \code{ggplot2}) of the transmissivity
+field from \code{\link{random2d}}.  Supports both raw \eqn{T} and
+log-transformed \eqn{\ln T} display.
 }
 \examples{
 TT= random2d()

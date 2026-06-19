@@ -2,20 +2,29 @@
 % Please edit documentation in R/steady2D.R
 \name{diffusion2D}
 \alias{diffusion2D}
-\title{2-D diffusion function solver}
+\title{2D groundwater diffusion residual function}
 \usage{
 diffusion2D(t, h, par)
 }
 \arguments{
-\item{t}{time}
+\item{t}{time \code{[T]} (unused in steady-state mode; required by the solver
+interface).}
 
-\item{h}{initial condition (not important in steady-state solution)}
+\item{h}{current head vector \code{[L]}, length \code{nx * ny}.}
 
-\item{par}{parameters}
+\item{par}{named list of parameters built inside \code{Fsteady2dsim()} or
+\code{Ftransient2dsim()}: \code{dx, dy, nx, ny, Tp, Sp, Qp, Nxp, Nyp}.}
 }
 \value{
-list of state variables (e.g., head values)
+A list containing the residual vector \eqn{\partial h / \partial t}
+(length \code{n}).
 }
 \description{
-2-D diffusion function solver
+Computes the finite-difference residual of the 2D groundwater flow equation
+\eqn{\partial h / \partial t = (1/S)\left[\nabla \cdot (T \nabla h) -
+Q\right]}.  Called internally by \code{Fsteady2dsim()} via
+\code{rootSolve::steady.2D()} and by \code{Ftransient2dsim()} via
+\code{deSolve::ode.2D()}.  Transmissivity at cell interfaces is computed with
+harmonic-mean interpolation to preserve flux continuity.  Boundary conditions
+are zero drawdown on all four edges.
 }

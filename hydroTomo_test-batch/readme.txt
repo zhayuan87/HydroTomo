@@ -1,0 +1,1 @@
+exp gau sph各个20

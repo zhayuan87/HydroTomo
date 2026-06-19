@@ -2,21 +2,33 @@
 % Please edit documentation in R/utilities.R
 \name{GenGrid}
 \alias{GenGrid}
-\title{generate forward running grid and output its grid and grid.
-input domain}
+\title{Generate a 2D finite difference grid}
 \usage{
 GenGrid(domain = c(40, 40, 0, 40, 0, 40))
 }
 \arguments{
-\item{domain}{c(Nx,Ny,x1,x2,y1,y2) domain of the grid.}
+\item{domain}{a 6-element vector \code{c(nx, ny, x1, x2, y1, y2)}.
+\code{nx} and \code{ny} are cell counts; \code{x1:x2} and \code{y1:y2}
+are domain extents \code{[L]}.}
 }
 \value{
-output n, xmid, ymid, and grid
+A list with elements:
+\describe{
+\item{n}{total number of cells (\code{nx * ny}).}
+\item{grid}{data frame of cell-centre coordinates (\code{x}, \code{y}).}
+\item{xmid, ymid}{vectors of cell-centre coordinates along each axis \code{[L]}.}
+\item{nx, ny}{number of cells in each direction.}
+\item{dx, dy}{cell sizes \code{[L]}.}
+\item{x1, x2, y1, y2}{domain bounds \code{[L]}.}
+}
 }
 \description{
-generate forward running grid and output its grid and grid.
-input domain
+Creates a uniform 2D grid for finite difference simulations.  The grid cells
+are centred at half-integer node positions and numbered by
+\code{expand.grid(x, y)} (x varies fastest).  The grid list can be passed to
+all forward and inverse functions to avoid recomputing grid geometry.
 }
 \examples{
 grid <- GenGrid()
+str(grid)
 }

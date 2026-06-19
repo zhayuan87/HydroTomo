@@ -3,23 +3,25 @@
 \docType{data}
 \name{pumpingtest_information}
 \alias{pumpingtest_information}
-\title{The pumping tests information conducted in Bulanghe Basin, China by Xi'an Geological Survey.}
+\title{Pumping test information from Bulanghe Basin, China}
 \format{
 A data frame with 12 rows and 7 variables:
 \describe{
-\item{test_name}{character, the pumping test name of the 12 tests}
-\item{pumping_well}{A1 to A6, the pumping well name.}
-\item{Q_(L_per_s)}{numeric, the pumping rate in cubic Liter per second.}
-\item{X}{numeric, the x coordinate of the pumping well in meter.}
-\item{Y}{numeric, the y coordinate of the pumping well in meter.}
-\item{start} {POSIXct, the start time of the pumping test.}
-\item{end} {POSIXct, the end time of the pumping test.}
+\item{test_name}{character, the pumping test name (e.g. \code{"A1-1"}).}
+\item{pumping_well}{character, the pumping well name (A1 to A6).}
+\item{Q_(L_per_s)}{numeric, the pumping rate in L/s \code{[L\eqn{^3}/T]}.}
+\item{X}{numeric, the x coordinate of the pumping well \code{[L]}.}
+\item{Y}{numeric, the y coordinate of the pumping well \code{[L]}.}
+\item{start}{POSIXct, the start time of the pumping test.}
+\item{end}{POSIXct, the end time of the pumping test.}
 }
 }
 \usage{
 pumpingtest_information
 }
 \description{
-The pumping tests information conducted in Bulanghe Basin, China by Xi'an Geological Survey.
+Details of 12 pumping tests conducted at the Bulanghe Basin by the Xi'an
+Geological Survey, China.  Used as reference data for hydraulic tomography
+inversion.
 }
 \keyword{datasets}

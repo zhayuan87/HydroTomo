@@ -2,7 +2,7 @@
 % Please edit documentation in R/HydroPlot.R
 \name{Plotsteady2d}
 \alias{Plotsteady2d}
-\title{Plot the generated head distribution from Fsteady2dsim.}
+\title{Plot 2D steady-state head or drawdown field}
 \usage{
 Plotsteady2d(
   s,
@@ -21,37 +21,42 @@ Plotsteady2d(
 )
 }
 \arguments{
-\item{palette}{a string, the palette to use. could be magma, inferno, plasma, viridis, cividis, rocket, marko, turbo, or simply A-G.}
+\item{s}{a data frame returned by \code{Fsteady2dsim()} (columns \code{x},
+\code{y}, \code{solution}).}
 
-\item{plotshow}{a logical value, if TRUE, the plot will be shown.}
+\item{palette}{a string, the \code{viridis} palette option to use:
+\code{"magma"}, \code{"inferno"}, \code{"plasma"}, \code{"viridis"}
+(default), \code{"cividis"}, \code{"rocket"}, \code{"mako"}, \code{"turbo"}.}
 
-\item{plotfile}{a string, the path to save the plot.}
+\item{plotshow}{a logical value; if \code{TRUE} (default), the plot is
+displayed.}
 
-\item{plotwidth}{a numeric value, the width of the plot.}
+\item{plotfile}{optional file path; if supplied the plot is saved as a PDF.}
 
-\item{plotheight}{a numeric value, the height of the plot.}
+\item{plotwidth, plotheight}{plot dimensions in inches.}
 
-\item{ifdrawdown}{a logical value, if true,  use drawdown, else using head change.}
+\item{ifdrawdown}{logical; if \code{TRUE} (default), negate the solution to
+display drawdown (positive = water-level decline).}
 
-\item{Qinf}{The pumping test information in a data.frame (Qp,xp,yp).}
+\item{Qinf}{data frame with columns \code{Qp}, \code{x}, \code{y} for pumping
+wells (plotted as red circles).  \code{NULL} to omit.}
 
-\item{Oinf}{The observation information in a data.frame (data,x,y).}
+\item{Oinf}{data frame with columns \code{data}, \code{x}, \code{y} for
+observation wells (plotted as yellow squares).  \code{NULL} to omit.}
 
-\item{title}{a string, the title of the plot.}
+\item{title}{plot title.  Automatically set if \code{NULL}.}
 
-\item{z}{a string, the label of z axis.}
+\item{z}{colour-bar label.  Automatically set if \code{NULL}.}
 
-\item{xlab}{a string, the label of x axis.}
-
-\item{ylab}{a string, the label of y axis.}
-
-\item{steady2d}{a data.frame, the result of Fsteady2dsim (x,y,headchange).}
+\item{xlab, ylab}{axis labels (default \code{"X/m"}, \code{"Y/m"}).}
 }
 \value{
-a plot showing contour.
+A \code{ggplot} object (invisibly when \code{plotshow = TRUE}).
 }
 \description{
-Plot the generated head distribution from Fsteady2dsim.
+Creates a filled contour plot (using \code{ggplot2}) of the steady-state head
+or drawdown field from \code{\link{Fsteady2dsim}}.  Pumping well and
+observation well locations can be overlaid.
 }
 \examples{
 Qinf = data.frame(Qp=c(10,10),x=c(10.5,30.5),y=c(20.5,20.5))

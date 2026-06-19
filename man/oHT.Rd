@@ -3,19 +3,21 @@
 \docType{data}
 \name{oHT}
 \alias{oHT}
-\title{The pumping test information in package form.}
+\title{Observation data in list form}
 \format{
-A list of 12 data frames, each data frame contains observation data and location.
+A list of 12 data frames, each with columns:
 \describe{
-\item{A1-1}{data frame of pumping test 1, with columns data(drawdown in m), x, y.}
-\item{A1-2}{data frame of pumping test 2, with columns data, x, y.}
-\item{...}{...}
+\item{data}{numeric, the observed drawdown \code{[L]}.}
+\item{x}{numeric, the x coordinate of the observation well \code{[L]}.}
+\item{y}{numeric, the y coordinate of the observation well \code{[L]}.}
 }
 }
 \usage{
 oHT
 }
 \description{
-The pumping test information in package form.
+A list of 12 data frames, one per pumping test.  Each data frame contains
+the observed drawdown and observation well location.  This is the format
+expected by all forward and inverse functions.
 }
 \keyword{datasets}

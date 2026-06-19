@@ -3,19 +3,21 @@
 \docType{data}
 \name{qHT}
 \alias{qHT}
-\title{The pumping test information in package form.}
+\title{Pumping test information in list form}
 \format{
-A list of 12 data frames, each data frame contains pumping rate and location.
+A list of 12 data frames, each with columns:
 \describe{
-\item{A1-1}{data frame of pumping test 1, with columns Qp(m3/d), x, y.}
-\item{A1-2}{data frame of pumping test 2, with columns Qp, x, y.}
-\item{...}{...}
+\item{Qp}{numeric, the pumping rate in m\eqn{^3}/d \code{[L\eqn{^3}/T]}.}
+\item{x}{numeric, the x coordinate of the pumping well \code{[L]}.}
+\item{y}{numeric, the y coordinate of the pumping well \code{[L]}.}
 }
 }
 \usage{
 qHT
 }
 \description{
-The pumping test information in package form.
+A list of 12 data frames, one per pumping test.  Each data frame contains
+the pumping rate and well location.  This is the format expected by all
+forward and inverse functions.
 }
 \keyword{datasets}

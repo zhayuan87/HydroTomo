@@ -3,20 +3,22 @@
 \docType{data}
 \name{blh_syn_best_truth}
 \alias{blh_syn_best_truth}
-\title{The best truth data generated using the same blh pumping and observation wells.}
+\title{Best-truth synthetic data for the Bulanghe Basin test case}
 \format{
-A list of oHT1, qHT1, trueK, and grid.
+A list with components:
 \describe{
-\item{trueK}{data frame of true transmissivity field used in the synthetic data generation.}
-\item{qHT1}{list of 6 pumping tests data frames used in the synthetic data generation.}
-\item{oHT1}{list of 6 observation data frames used in the synthetic data generation.}
-\item{grid}{the grid information used in the synthetic data generation.}
+\item{trueK}{data frame, the true transmissivity field (columns \code{x},
+\code{y}, \code{Tp}) \code{[L\eqn{^2}/T]}.}
+\item{qHT1}{list of 6 pumping test data frames (columns \code{Qp, x, y}).}
+\item{oHT1}{list of 6 observation data frames (columns \code{data, x, y}).}
+\item{grid}{the grid list from \code{GenGrid()}.}
 }
 }
 \usage{
 blh_syn_best_truth
 }
 \description{
-The best truth data generated using the same blh pumping and observation wells.
+A refined synthetic dataset with the best-estimate true transmissivity field
+for validating inversion results against the Bulanghe Basin configuration.
 }
 \keyword{datasets}

@@ -2,8 +2,7 @@
 % Please edit documentation in R/utilities.R
 \name{GenGrid2}
 \alias{GenGrid2}
-\title{generate forward running grid and output its grid and observation/source grid.
-input domain, pump and obs location}
+\title{Generate a 2D finite difference grid with pump and observation locations}
 \usage{
 GenGrid2(
   domain = c(40, 40, 0, 40, 0, 40),
@@ -12,19 +11,25 @@ GenGrid2(
 )
 }
 \arguments{
-\item{domain}{c(Nx,Ny,x1,x2,y1,y2) domain of the grid.}
+\item{domain}{a 6-element vector \code{c(nx, ny, x1, x2, y1, y2)}.
+\code{nx} and \code{ny} are cell counts; \code{x1:x2} and \code{y1:y2}
+are domain extents \code{[L]}.}
 
-\item{pump}{c(xp,yp) pump location.}
+\item{pump}{a list with elements \code{xp} \code{[L]} and \code{yp} \code{[L]} giving the
+pumping well coordinates.}
 
-\item{obs}{c(xo,yo) observation location.}
+\item{obs}{a list with elements \code{xo} \code{[L]} and \code{yo} \code{[L]} giving the
+observation well coordinates.}
 }
 \value{
-output grid, pump and obs element number
+A list with elements \code{n}, \code{grid}, \code{pump} (c(Nxp, Nyp)),
+and \code{obs} (c(Nxo, Nyo)).
 }
 \description{
-generate forward running grid and output its grid and observation/source grid.
-input domain, pump and obs location
+Convenience function that creates a grid and simultaneously maps a single
+pumping well and a single observation well to their grid indices.  Useful
+for quick tests and demonstrations.
 }
 \examples{
-grid <- GenGrid()
+grid <- GenGrid2()
 }
