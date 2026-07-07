@@ -68,4 +68,32 @@ h_end  <- matrix(res$out[nrow(res$out), -1], grid2d$nx, grid2d$ny)
 set.seed(1)
 TT  <- random2d(nsim = 1)$Tp
 res <- Ftransient2dsim(TT = TT, SS = 1e-3, times = seq(0, 100, by = 10))
+
+# ---- Compare with Theis analytical solution ----
+\dontrun{
+# Large domain, pumping at centre, observation well 200 m away
+Q  <- 1.3e-3; T_val <- 1.5e-3; S_val <- 2e-5; rw <- 200
+domain <- c(80, 80, 0, 800, 0, 800)
+grid   <- GenGrid(domain)
+times  <- seq(0, 1000, by = 1)
+res2d  <- Ftransient2dsim(domain = domain, grid = grid,
+                          TT = T_val, SS = S_val,
+                          Qinf = data.frame(Qp = Q, x = 400, y = 400),
+                          times = times, lrw = 2000000)
+# Extract drawdown at observation well
+obs_t  <- c(10, 30, 100, 300, 1000)
+Oinf   <- data.frame(data = NA, x = 600, y = 400, time = obs_t)
+Oinf   <- samDataTr(Oinf = Oinf, grid = grid, result_tr = res2d)
+s_2d   <- -Oinf$data
+# Theis analytical solution
+s_theis <- theis_drawdown(Q, rw, T_val, S_val, obs_t)
+# Plot comparison with ggplot2
+library(ggplot2)
+ggplot() +
+  geom_line(aes(obs_t, s_theis, color = "Theis"), linewidth = 1) +
+  geom_point(aes(obs_t, s_2d, color = "2D"), size = 2.5) +
+  scale_x_log10() +
+  labs(x = "t (s)", y = "s (m)", color = NULL) +
+  theme_bw()
+}
 }

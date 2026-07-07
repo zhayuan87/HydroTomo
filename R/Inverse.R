@@ -1,4 +1,4 @@
-#' 2D Ensemble-based Bayesian inversion for hydraulic tomography (serial)
+﻿#' 2D Ensemble-based Bayesian inversion for hydraulic tomography (serial)
 #'
 #' Performs ensemble-smoother-based Bayesian inversion to estimate the 2D
 #' log-transmissivity field \eqn{\ln T(\mathbf{x})} from hydraulic tomography
@@ -850,6 +850,110 @@ samHTmcPar3D <- function(grid,
 }
 
 
+# ==============================================================================
+# 3D Steady-State HT — Well-Screen (Vertical Interval) Functions
+# ==============================================================================
+
+#' Run forward simulations for one K field — well-screen version (3D steady)
+#'
+#' Steady-state counterpart of \code{\link{samHT3DtrScreen}}.  Calls
+#' \code{Fsteady3dsim} for each pumping test and averages simulated heads
+#' over the vertical screen interval of each observation well.
+#'
+#' @param grid  grid from \code{GenGrid3D()}.
+#' @param TT    length-\code{n} vector of hydraulic conductivity K \code{[L/T]}.
+#' @param qHT   list of pumping test data frames, each with columns
+#'   \code{Qp, x, y, z_top, z_bottom} (well-screen pumping) or
+#'   \code{Qp, x, y, z} (point pumping).
+#' @param oHT   list of observation data frames, each with columns
+#'   \code{data, x, y, z_top, z_bottom}.
+#' @param lrw   real work array length for \code{steady.3D}; default 20000000.
+#' @param simplify if \code{TRUE} return a plain vector of sampled heads
+#'   (all tests concatenated); if \code{FALSE} return updated \code{oHT}.
+#' @return vector of interval-averaged drawdown values (when \code{simplify = TRUE}).
+#' @export
+#' @examples
+#' grid3d <- GenGrid3D(c(15,15,5,0,15,0,15,0,5))
+#' Qinf   <- data.frame(Qp=10, x=7.5, y=7.5, z_top=2, z_bottom=3)
+#' Oinf   <- data.frame(data=NA, x=c(5,10), y=c(7.5,7.5),
+#'                      z_top=c(1,1), z_bottom=c(4,4))
+#' da     <- samHT3DScreen(grid=grid3d, TT=0.1,
+#'                         qHT=list(Qinf), oHT=list(Oinf))
+samHT3DScreen <- function(grid,
+                          TT       = 0.1,
+                          qHT      = list(data.frame(Qp=10, x=7.5, y=7.5,
+                                                     z_top=2, z_bottom=3)),
+                          oHT      = list(data.frame(data=NA, x=5, y=5,
+                                                     z_top=1, z_bottom=4)),
+                          lrw      = 20000000,
+                          simplify = TRUE) {
+
+  nHT <- length(qHT)
+  for (i in seq_len(nHT)) {
+    qinf <- qHT[[i]]
+    oinf <- oHT[[i]]
+    h    <- Fsteady3dsim(KK = TT, Qinf = qinf, grid = grid, lrw = lrw)$solution
+    oinf <- samData3DScreen(Oinf = oinf, grid = grid, h = h)
+    oHT[[i]] <- oinf[, c('data', 'x', 'y', 'z_top', 'z_bottom')]
+  }
+  if (simplify) {
+    oHTdf <- dplyr::bind_rows(oHT, .id = 'id')
+    return(oHTdf$data)
+  } else {
+    return(oHT)
+  }
+}
+
+
+#' Parallel MC forward runs for 3D steady HT — well-screen version (ensemble)
+#'
+#' Like \code{\link{samHTmcPar3D}} but uses \code{\link{samHT3DScreen}}
+#' for interval-averaged well-screen sampling.
+#'
+#' @param grid   grid from \code{GenGrid3D()}.
+#' @param TT     \code{n × nsim} matrix of K realisations.
+#' @param qHT    list of pumping test data frames (columns
+#'   \code{Qp, x, y, z_top, z_bottom} for well-screen pumping, or
+#'   \code{Qp, x, y, z} for point pumping).
+#' @param oHT    list of observation data frames (columns
+#'   \code{data, x, y, z_top, z_bottom}).
+#' @param lrw    real work array length; default 20000000.
+#' @param ncore  number of parallel cores.
+#' @return \code{nsim × nobs} matrix of interval-averaged heads.
+#' @export
+#' @examples
+#' grid3d <- GenGrid3D(c(15,15,5,0,15,0,15,0,5))
+#' KKmat  <- random3d(nsim=5, grid=grid3d)
+#' KKmat  <- as.matrix(KKmat[,-c(1,2,3)])
+#' Qinf   <- data.frame(Qp=10, x=7.5, y=7.5, z_top=2, z_bottom=3)
+#' Oinf   <- data.frame(data=NA, x=c(5,10), y=c(7.5,7.5),
+#'                      z_top=c(1,1), z_bottom=c(4,4))
+#' da     <- samHTmcPar3DScreen(grid=grid3d, TT=KKmat,
+#'                              qHT=list(Qinf), oHT=list(Oinf), ncore=2)
+samHTmcPar3DScreen <- function(grid,
+                               TT    = 0.1,
+                               qHT   = list(data.frame(Qp=10, x=7.5, y=7.5,
+                                                       z_top=2, z_bottom=3)),
+                               oHT   = list(data.frame(data=NA, x=5, y=5,
+                                                       z_top=1, z_bottom=4)),
+                               lrw   = 20000000,
+                               ncore = 4) {
+
+  library('foreach')
+  library('doParallel')
+  registerDoParallel(cores = ncore)
+
+  nsim <- ncol(TT)
+  x <- foreach(i = 1:nsim, .combine = rbind) %dopar% {
+    HydroTomo::samHT3DScreen(grid = grid, TT = TT[, i],
+                             qHT = qHT, oHT = oHT, lrw = lrw)
+  }
+
+  stopImplicitCluster()
+  return(x)
+}
+
+
 #' 3D Ensemble-based Bayesian inverse for hydraulic tomography (parallel)
 #'
 #' 3D extension of \code{Finverse3}, replacing all 2D components (grid,
@@ -995,6 +1099,567 @@ Finverse3D <- function(
 
     niter <- niter + 1
     mul   <- mul / decay
+  }
+
+  print("--- total time ---")
+  print(difftime(Sys.time(), startTime))
+  return(iterdf)
+}
+
+
+# ==============================================================================
+# 3D Steady-State HT — Well-Screen Inverse
+# ==============================================================================
+
+#' 3D Steady HT ensemble inverse — well-screen (vertical interval) version
+#'
+#' Like \code{\link{Finverse3D}} but for wells with vertical screens
+#' (filter sections).  Observation wells are defined by \code{(x, y)} and a
+#' screen interval \code{[z_top, z_bottom]}.  The forward solver
+#' \code{\link{Fsteady3dsim}} computes full 3D steady heads, and
+#' \code{\link{samData3DScreen}} averages heads over all grid cells within
+#' the screen interval.
+#'
+#' @param domain  9-element vector \code{c(nx, ny, nz, x1, x2, y1, y2, z1, z2)}.
+#' @param grid    grid from \code{GenGrid3D()}; generated from \code{domain}
+#'   if \code{NULL}.
+#' @param qHT     list of pumping test data frames with columns
+#'   \code{Qp, x, y, z_top, z_bottom} (well-screen pumping) or
+#'   \code{Qp, x, y, z} (point pumping).
+#' @param nsim    ensemble size (default 50).
+#' @param itermax maximum iterations.
+#' @param varmeanTmax  convergence threshold on variance of mean ln(K).
+#' @param rmsemin minimum RMSE stopping criterion.
+#' @param mul     stabiliser (default 1.0).
+#' @param decay   stabiliser decay per iteration (default 1.05).
+#' @param oHT     list of observation data frames with columns
+#'   \code{data, x, y, z_top, z_bottom}.
+#' @param lrw     real work array length for \code{steady.3D} (default 20000000).
+#' @param ncore   number of parallel cores (default 4).
+#' @param geo     prior geostatistical parameters (list).
+#' @return list of per-iteration results.
+#' @export
+#' @examples
+#' # --- small synthetic test with well screens ---
+#' domain3d <- c(15, 15, 5, 0, 15, 0, 15, 0, 5)
+#' grid3d   <- GenGrid3D(domain3d)
+#' set.seed(42)
+#' trueK3d  <- random3d(nsim=1, grid=grid3d)
+#' Qinf3d   <- data.frame(Qp=10, x=7.5, y=7.5, z_top=2, z_bottom=3)
+#' qHT3d    <- list(test1 = Qinf3d)
+#' res3d    <- Fsteady3dsim(grid=grid3d, KK=trueK3d$Kp, Qinf=Qinf3d)
+#' loc      <- expand.grid(x=c(3,6,9,12), y=c(3,6,9,12))
+#' Oinf3d   <- data.frame(data=NA, x=loc$x, y=loc$y,
+#'                        z_top=1, z_bottom=4)
+#' Oinf3d   <- samData3DScreen(Oinf=Oinf3d, grid=grid3d, h=res3d$solution)
+#' oHT3d    <- list(test1 = Oinf3d)
+#' result3d <- Finverse3DScreen(grid=grid3d, qHT=qHT3d, oHT=oHT3d,
+#'                              nsim=20, itermax=1, ncore=2)
+Finverse3DScreen <- function(
+    domain      = c(15, 15, 5, 0, 15, 0, 15, 0, 5),
+    grid        = NULL,
+    qHT         = list(data.frame(Qp=10, x=7.5, y=7.5, z_top=2, z_bottom=3)),
+    nsim        = 50,
+    itermax     = 5,
+    varmeanTmax = 5,
+    rmsemin     = 0,
+    mul         = 1.0,
+    decay       = 1.05,
+    oHT         = list(data.frame(data=-1, x=5, y=5,
+                                 z_top=1, z_bottom=4)),
+    lrw         = 20000000,
+    ncore       = 4,
+    geo         = list(me=0, var=1, geomod="Exp",
+                       range=10, nugget=0,
+                       anis=c(0, 0, 0, 1, 1))) {
+
+  set.seed(200)
+  startTime <- Sys.time()
+
+  if (is.null(grid)) grid <- GenGrid3D(domain)
+
+  nHT <- length(qHT)
+
+  # ---- extract observation data ----------------------------------------------
+  trueobshHT <- list()
+  for (i in seq_len(nHT)) {
+    oinf            <- oHT[[i]]
+    trueobshHT[[i]] <- oinf$data
+  }
+  trueobsh <- unlist(trueobshHT)
+  nobs     <- length(trueobsh)
+
+  # ---- initial ensemble ------------------------------------------------------
+  yy   <- random3d(nsim = nsim, grid = grid, geo = geo)
+  Knew <- as.matrix(yy[, -c(1, 2, 3)])
+
+  # ---- iteration loop --------------------------------------------------------
+  niter    <- 1
+  varmeanT <- 0
+  rmse     <- 1e10
+  msgdf    <- data.frame(niter = niter, varmeanT = varmeanT, rmse = rmse)
+  iterdf   <- list()
+
+  while (niter <= itermax & varmeanT < varmeanTmax & rmse > rmsemin) {
+
+    varT     <- apply(log(Knew), 1, var)
+    meanT    <- apply(log(Knew), 1, mean)
+    varmeanT <- var(meanT)
+
+    # parallel steady forward runs — screen-averaged
+    obsh <- samHTmcPar3DScreen(grid  = grid,
+                               TT    = Knew,
+                               qHT   = qHT,
+                               oHT   = oHT,
+                               lrw   = lrw,
+                               ncore = ncore)
+
+    # ---- statistics ----------------------------------------------------------
+    varobsh  <- apply(obsh, 2, var)
+    meanobsh <- apply(obsh, 2, mean)
+    weigs    <- 1 / varobsh / sum(1 / varobsh)
+    rmse     <- mean((trueobsh - meanobsh)^2 * weigs)^0.5
+    l2       <- mean((trueobsh - meanobsh)^2)^0.5
+    l1       <- mean(abs(trueobsh - meanobsh))
+
+    # ---- Bayesian update -----------------------------------------------------
+    covh  <- cov(obsh)
+    covhk <- cov(obsh, t(log(Knew)))
+    covh1 <- covh
+    diag(covh1) <- rep((1 + mul) * max(diag(covh)), nobs)
+    a <- solve(covh1, covhk)
+
+    for (i in seq_len(nsim)) {
+      Knew[, i] <- Knew[, i] * exp(t(a) %*% (trueobsh - obsh[i, ]))
+    }
+
+    msg <- paste('niter =', niter,
+                 'varmeanT =', round(varmeanT, 4),
+                 'rmse =', round(rmse, 4),
+                 'l2 =', round(l2, 4),
+                 'l1 =', round(l1, 4))
+    print(msg)
+
+    iterdf[[niter]] <- list(meanT    = as.vector(meanT),
+                            varT     = as.vector(varT),
+                            meanobsh = meanobsh,
+                            varobsh  = varobsh)
+
+    if (niter == 1) {
+      print("--- time for one iteration ---")
+      print(difftime(Sys.time(), startTime))
+    }
+
+    niter <- niter + 1
+    mul   <- mul / decay
+  }
+
+  print("--- total time ---")
+  print(difftime(Sys.time(), startTime))
+  return(iterdf)
+}
+
+
+# ==============================================================================
+# Adjoint-state sensitivity computation for 2D steady-state HT
+# ==============================================================================
+
+#' Solve the adjoint equation for a single observation point (2D steady-state)
+#'
+#' For the 2D steady-state groundwater flow equation
+#' \eqn{\nabla \cdot (T \nabla h) = Q}, the adjoint state \eqn{\lambda} for an
+#' observation at cell \code{iobs} satisfies:
+#' \deqn{\nabla \cdot (T \nabla \lambda) = \delta(\mathbf{x} - \mathbf{x}_{iobs})}
+#' with homogeneous (zero) boundary conditions.  This is the same PDE as the
+#' forward problem but with a unit source at the observation location instead
+#' of a pumping well.  The adjoint variable is used to compute the Jacobian
+#' (sensitivity) matrix via:
+#' \deqn{\frac{\partial h_{iobs}}{\partial (\ln T)_k} =
+#'       -T_k \, \nabla h|_k \cdot \nabla \lambda|_k \, \Delta x \, \Delta y}
+#'
+#' @param grid    grid list from \code{GenGrid()}.
+#' @param TT      transmissivity field \eqn{T} \code{[L^2/T]}, length-\code{n} vector.
+#' @param iobs    scalar integer, the flat element index of the observation point.
+#' @param lrw     real work array length for \code{steady.2D} (default 160000).
+#' @return Numeric vector of adjoint variable \eqn{\lambda} (length \code{n}).
+#' @keywords internal
+adjoint2D <- function(grid, TT, iobs, lrw = 160000) {
+  require('rootSolve')
+
+  n   <- grid$n
+  nx  <- grid$nx
+  ny  <- grid$ny
+  dx  <- grid$dx
+  dy  <- grid$dy
+
+  Tp <- if (length(TT) == 1) rep(TT, n) else TT
+  Sp <- rep(1, n)
+  Tpm <- matrix(Tp, nx, ny)
+  Spm <- matrix(Sp, nx, ny)
+
+  # Build the adjoint source: unit extraction at the observation cell
+  # The adjoint PDE has source +delta(x - x_obs) on the RHS.
+  # In the diffusion2D residual, Qp/(dx*dy*S) is subtracted from dY at the pump cell.
+  # For adjoint, we want a unit source, so we set Qp = dx*dy (S=1 for steady-state)
+  # and place it at the observation cell.
+
+  # Convert flat index iobs to (Nxp, Nyp)
+  Nxp <- ((iobs - 1) %% nx) + 1
+  Nyp <- ((iobs - 1) %/% nx) + 1
+
+  # Adjoint source: Qp = dx*dy so that Qp/(dx*dy*Spm) = 1 at the obs cell
+  Qp_adj <- dx * dy
+
+  para <- list(dx = dx, dy = dy, nx = nx, ny = ny,
+               Tpm = Tpm, Spm = Spm,
+               Qp = Qp_adj, Nxp = Nxp, Nyp = Nyp)
+
+  y_init <- rep(0, n)
+  s_adj <- steady.2D(y = y_init, parms = para,
+                     func = diffusion2D, dimens = c(nx, ny), lrw = lrw)$y
+
+  return(s_adj)
+}
+
+
+#' Compute the Jacobian (sensitivity) matrix via the adjoint-state method
+#'
+#' For 2D steady-state hydraulic tomography, computes the Jacobian matrix
+#' \eqn{\mathbf{J} = \partial \mathbf{h} / \partial (\ln \mathbf{T})}
+#' (dimension \code{nobs × nelem}) using the adjoint-state method.
+#'
+#' For each pumping test \eqn{j} and each observation \eqn{i}:
+#' \enumerate{
+#'   \item Solve the forward problem to obtain head field \eqn{h}
+#'   \item Solve the adjoint problem to obtain \eqn{\lambda_i}
+#'   \item Compute sensitivity:
+#'         \eqn{J_{ik} = -T_k \, (\nabla h|_k \cdot \nabla \lambda_i|_k) \, \Delta x \, \Delta y}
+#' }
+#'
+#' @param grid    grid list from \code{GenGrid()}.
+#' @param TT      transmissivity field \eqn{T} \code{[L^2/T]}, length-\code{n} vector.
+#' @param qHT     list of pumping test data frames (columns \code{Qp, x, y}).
+#' @param oHT     list of observation data frames (columns \code{data, x, y}).
+#' @param lrw     real work array length for \code{steady.2D} (default 160000).
+#' @return A matrix of dimension \code{nobs × nelem}.
+#' @examples
+#' # ---- 1. Setup grid and transmissivity field ----
+#' domain <- c(20, 20, 0, 20, 0, 20)
+#' grid   <- GenGrid(domain)
+#' set.seed(123)
+#' TT <- random2d(grid = grid, nsim = 1)$Tp
+#'
+#' # ---- 2. Define pumping tests and observations ----
+#' qHT <- list(
+#'   data.frame(Qp = 10, x = 10.5, y = 10.5),
+#'   data.frame(Qp = 10, x = 15.5, y = 15.5)
+#' )
+#' oHT <- list(
+#'   data.frame(data = -1, x = 5.5, y = 5.5),
+#'   data.frame(data = -1, x = 12.5, y = 12.5)
+#' )
+#'
+#' # ---- 3. Compute Jacobian ----
+#' J <- jacobian2D(grid = grid, TT = TT, qHT = qHT, oHT = oHT)
+#'
+#' # ---- 4. Inspect results ----
+#' # Jacobian dimensions: nobs × nelem
+#' dim(J)
+#' # Sensitivity map for the first observation (row 1)
+#' image(matrix(J[1, ], grid$nx, grid$ny),
+#'       main = "Sensitivity: obs 1")
+#' @export
+jacobian2D <- function(grid,
+                       TT,
+                       qHT = list(data.frame(Qp = 10, x = 20.5, y = 20.5)),
+                       oHT = list(data.frame(data = -1, x = 11, y = 11)),
+                       lrw = 160000) {
+
+  require('rootSolve')
+
+  nHT  <- length(qHT)
+  n    <- grid$n
+  nx   <- grid$nx
+  ny   <- grid$ny
+  dx   <- grid$dx
+  dy   <- grid$dy
+  dV   <- dx * dy   # cell volume (area in 2D)
+
+  # ---- Collect observation element indices and counts ----
+  loc_obsHT <- list()
+  nobs_per_test <- integer(nHT)
+  for (j in seq_len(nHT)) {
+    oinf <- oHT[[j]]
+    oelemdf <- getOelem(grid = grid, Oinf = oinf)
+    loc_obsHT[[j]] <- oelemdf$nelem
+    nobs_per_test[j] <- nrow(oinf)
+  }
+  nobs <- sum(nobs_per_test)
+
+  Tp <- if (length(TT) == 1) rep(TT, n) else TT
+
+  # ---- Pre-allocate Jacobian ----
+  J <- matrix(0, nrow = nobs, ncol = n)
+
+  # ---- Row offset tracker ----
+  row_offset <- 0
+
+  for (j in seq_len(nHT)) {
+    qinf <- qHT[[j]]
+    obs_elem <- loc_obsHT[[j]]
+    nlocal <- length(obs_elem)
+
+    # --- Forward solve for pumping test j ---
+    h_forward <- Fsteady2dsim(grid = grid, TT = Tp, Qinf = qinf, lrw = lrw)$solution
+    h_mat <- matrix(h_forward, nx, ny)
+
+    # --- Compute forward head gradients (cell-centred) ---
+    dhdx <- matrix(0, nx, ny)
+    dhdy <- matrix(0, nx, ny)
+
+    # Interior x-derivative (central difference)
+    if (nx > 1) {
+      dhdx[2:(nx - 1), ] <- (h_mat[3:nx, ] - h_mat[1:(nx - 2), ]) / (2 * dx)
+      dhdx[1, ]  <- (h_mat[2, ] - h_mat[1, ]) / dx
+      dhdx[nx, ] <- (h_mat[nx, ] - h_mat[nx - 1, ]) / dx
+    }
+
+    # Interior y-derivative (central difference)
+    if (ny > 1) {
+      dhdy[, 2:(ny - 1)] <- (h_mat[, 3:ny] - h_mat[, 1:(ny - 2)]) / (2 * dy)
+      dhdy[, 1]  <- (h_mat[, 2] - h_mat[, 1]) / dy
+      dhdy[, ny] <- (h_mat[, ny] - h_mat[, ny - 1]) / dy
+    }
+
+    # --- For each observation in this test, solve adjoint and compute sensitivity ---
+    for (i_local in seq_len(nlocal)) {
+      iobs <- obs_elem[i_local]
+      global_row <- row_offset + i_local
+
+      # Solve adjoint equation
+      lambda <- adjoint2D(grid = grid, TT = Tp, iobs = iobs, lrw = lrw)
+      lambda_mat <- matrix(lambda, nx, ny)
+
+      # Compute adjoint gradients
+      dldx <- matrix(0, nx, ny)
+      dldy <- matrix(0, nx, ny)
+
+      if (nx > 1) {
+        dldx[2:(nx - 1), ] <- (lambda_mat[3:nx, ] - lambda_mat[1:(nx - 2), ]) / (2 * dx)
+        dldx[1, ]  <- (lambda_mat[2, ] - lambda_mat[1, ]) / dx
+        dldx[nx, ] <- (lambda_mat[nx, ] - lambda_mat[nx - 1, ]) / dx
+      }
+      if (ny > 1) {
+        dldy[, 2:(ny - 1)] <- (lambda_mat[, 3:ny] - lambda_mat[, 1:(ny - 2)]) / (2 * dy)
+        dldy[, 1]  <- (lambda_mat[, 2] - lambda_mat[, 1]) / dy
+        dldy[, ny] <- (lambda_mat[, ny] - lambda_mat[, ny - 1]) / dy
+      }
+
+      # Sensitivity: J_{ik} = -T_k * (grad_h_k · grad_lambda_i_k) * dV
+      grad_dot <- as.vector(dhdx * dldx + dhdy * dldy)
+      J[global_row, ] <- -Tp * grad_dot * dV
+    }
+
+    row_offset <- row_offset + nlocal
+  }
+
+  return(J)
+}
+
+
+#' 2D Adjoint-based deterministic inversion for hydraulic tomography
+#'
+#' Performs deterministic Bayesian inversion to estimate the 2D
+#' log-transmissivity field \eqn{\ln T(\mathbf{x})} from hydraulic tomography
+#' (HT) data using the **adjoint-state method** to compute the Jacobian
+#' (sensitivity) matrix analytically, instead of using ensemble statistics
+#' as in the ESMDA-based \code{\link{Finverse3}}.
+#'
+#' The update follows the quasi-linear Bayesian formulation:
+#' \deqn{\Delta \mathbf{m} = (\mathbf{J}^\top \mathbf{R}^{-1} \mathbf{J} +
+#'       \mathbf{C}_{kk}^{-1})^{-1} \,
+#'       \mathbf{J}^\top \mathbf{R}^{-1} \,
+#'       (\mathbf{d}_{\text{obs}} - \mathbf{g}(\mathbf{m}))}
+#' where \eqn{\mathbf{J}} is the Jacobian from \code{\link{jacobian2D}},
+#' \eqn{\mathbf{R}} is the observation error covariance (assumed diagonal with
+#' variance \code{sigma2obs}), and \eqn{\mathbf{C}_{kk}} is the prior parameter
+#' covariance derived from the geostatistical model.
+#'
+#' A Levenberg-Marquardt damping parameter \code{lambda_lm} is added to the
+#' diagonal of the Hessian approximation for stability.
+#'
+#' @param domain   a 6-element vector \code{c(nx, ny, x1, x2, y1, y2)} \code{[L]}.
+#' @param grid     grid list from \code{GenGrid()}; generated from \code{domain}
+#'   if \code{NULL}.
+#' @param qHT      list of pumping test data frames (columns \code{Qp, x, y}).
+#' @param itermax  maximum number of iterations (default 5).
+#' @param rmsemin  minimum RMSE stopping criterion (default 0).
+#' @param oHT      list of observation data frames (columns \code{data, x, y}).
+#' @param lrw      real work array length for \code{steady.2D} (default 160000).
+#' @param sigma2obs observation error variance (default 1e-4).
+#' @param lambda_lm Levenberg-Marquardt damping parameter (default 1.0); decays
+#'   by \code{decay_lm} each iteration.
+#' @param decay_lm  decay factor for \code{lambda_lm} (default 2.0).
+#' @param geo      prior geostatistical parameters:
+#'   \code{list(me, var, geomod, anis, range, nugget)}.
+#' @param m0       initial log-T field, length \code{n} vector.  If \code{NULL}
+#'   (default), uses the prior mean \code{geo$me} everywhere.
+#' @param ifcor    logical; if \code{TRUE}, returns the Jacobian matrix and
+#'   forward response after the first iteration without performing the update.
+#' @return A list of per-iteration results, each a list with
+#'   \code{m} (log-T estimate), \code{h_sim} (simulated heads),
+#'   \code{rmse}, \code{l2}, \code{l1}, and \code{J} (Jacobian, first iteration
+#'   only).  When \code{ifcor = TRUE}, returns list(J = J, h_sim = h_sim).
+#' @export
+#' @examples
+#' \dontrun{
+#' set.seed(100)
+#' trueK <- random2d(nsim=1)
+#' TT <- trueK[,-c(1,2)]
+#' domain <- c(40,40,0,40,0,40)
+#' grid <- GenGrid(domain)
+#' Qinf1 <- data.frame(Qp=10, x=20.5, y=20.5)
+#' qHT <- list(test1 = Qinf1)
+#' trueh <- Fsteady2dsim(TT=TT, Qinf=Qinf1, domain=domain)
+#' locx <- c(15,18,22,25,30)
+#' locy <- c(15,18,22,25,30)
+#' loc <- expand.grid(x=locx, y=locy)
+#' Oinf1 <- data.frame(data=NA, x=loc$x, y=loc$y)
+#' Oinf1 <- samData(grid=grid, Oinf=Oinf1, h=trueh$solution)
+#' oHT <- list(test1 = Oinf1)
+#' result <- FinverseAdj(grid=grid, qHT=qHT, oHT=oHT, itermax=3)
+#' }
+FinverseAdj <- function(
+    domain      = c(40, 40, 0, 40, 0, 40),
+    grid        = NULL,
+    qHT         = list(data.frame(Qp = 10, x = 20.5, y = 20.5)),
+    itermax     = 5,
+    rmsemin     = 0,
+    oHT         = list(data.frame(data = -1, x = 11, y = 11)),
+    lrw         = 160000,
+    sigma2obs   = 1e-4,
+    lambda_lm   = 1.0,
+    decay_lm    = 2.0,
+    geo         = list(me = 0, var = 1, geomod = "Exp",
+                       anis = c(90, 1), range = 30, nugget = 0),
+    m0          = NULL,
+    ifcor       = FALSE) {
+
+  set.seed(200)
+  startTime <- Sys.time()
+
+  if (is.null(grid)) grid <- GenGrid(domain)
+
+  n <- grid$n
+  nHT <- length(qHT)
+
+  # ---- Extract observation data ----
+  trueobshHT <- list()
+  loc_obsHT  <- list()
+  for (i in seq_len(nHT)) {
+    oinf <- oHT[[i]]
+    oelemdf <- getOelem(grid = grid, Oinf = oinf)
+    loc_obsHT[[i]] <- oelemdf$nelem
+    trueobshHT[[i]] <- oinf$data
+  }
+  trueobsh <- unlist(trueobshHT)
+  nobs <- length(trueobsh)
+
+  # ---- Build prior covariance C_kk from geostatistical model ----
+  # Use the same variogram model as random2d to compute covariance
+  require('gstat')
+  xy <- grid$grid
+
+  # Compute prior covariance matrix analytically from variogram model
+  # C_kk(i,j) = sill - variogram(|x_i - x_j|)
+  dist_mat <- as.matrix(dist(xy))
+  if (geo$geomod == "Exp") {
+    C_kk <- geo$var * exp(-dist_mat / geo$range)
+    diag(C_kk) <- geo$var + geo$nugget
+  } else if (geo$geomod == "Gau") {
+    C_kk <- geo$var * exp(-(dist_mat / geo$range)^2)
+    diag(C_kk) <- geo$var + geo$nugget
+  } else if (geo$geomod == "Sph") {
+    hr <- dist_mat / geo$range
+    C_kk <- geo$var * (1 - 1.5 * hr + 0.5 * hr^3)
+    C_kk[hr > 1] <- 0
+    diag(C_kk) <- geo$var + geo$nugget
+  } else {
+    C_kk <- geo$var * exp(-dist_mat / geo$range)
+    diag(C_kk) <- geo$var + geo$nugget
+  }
+
+  # ---- Initial parameter estimate ----
+  if (is.null(m0)) {
+    m <- rep(geo$me, n)  # log-T
+  } else {
+    m <- m0
+  }
+  T_current <- exp(m)
+
+  # ---- Iteration loop ----
+  niter <- 1
+  rmse <- 1e10
+  iterdf <- list()
+
+  while (niter <= itermax && rmse > rmsemin) {
+
+    # --- Forward simulation at current T ---
+    h_sim_vec <- samHT(grid = grid, TT = T_current,
+                       qHT = qHT, oHT = oHT, lrw = lrw)
+
+    # --- Misfit ---
+    residual <- trueobsh - h_sim_vec
+    rmse <- sqrt(mean(residual^2))
+    l2 <- rmse
+    l1 <- mean(abs(residual))
+
+    msg <- paste('niter =', niter,
+                 'rmse =', round(rmse, 6),
+                 'l2 =', round(l2, 6),
+                 'l1 =', round(l1, 6),
+                 'lambda_lm =', round(lambda_lm, 4))
+    print(msg)
+
+    # --- Compute Jacobian ---
+    J <- jacobian2D(grid = grid, TT = T_current,
+                    qHT = qHT, oHT = oHT, lrw = lrw)
+
+    if (ifcor) {
+      print("ifcor = TRUE: returning Jacobian and simulated heads without update.")
+      return(list(J = J, h_sim = h_sim_vec))
+    }
+
+    # --- Compute update (dual / observation-space formulation) ---
+    # dm = C_kk * J^T * (J * C_kk * J^T + R + lambda_lm * I)^{-1} * residual
+    Jt <- t(J)                                     # nelem x nobs
+    JCJt <- J %*% C_kk %*% Jt                      # nobs x nobs
+    S <- JCJt + (sigma2obs + lambda_lm) * diag(nobs)
+
+    beta <- solve(S, residual)                     # nobs
+    dm <- as.vector(C_kk %*% Jt %*% beta)          # nelem
+
+    # --- Update parameters ---
+    m <- m + dm
+    T_current <- exp(m)
+
+    # --- Store iteration results ---
+    iterdf[[niter]] <- list(
+      m       = m,
+      h_sim   = h_sim_vec,
+      rmse    = rmse,
+      l2      = l2,
+      l1      = l1
+    )
+
+    if (niter == 1) {
+      iterdf[[niter]]$J <- J
+      print("--- time for one iteration ---")
+      print(difftime(Sys.time(), startTime))
+    }
+
+    niter <- niter + 1
+    lambda_lm <- lambda_lm / decay_lm
   }
 
   print("--- total time ---")
@@ -1260,6 +1925,417 @@ Finverse3Tr <- function(
 
     niter <- niter + 1
     mul   <- mul / decay
+  }
+
+  print("--- total time ---")
+  print(difftime(Sys.time(), startTime))
+  return(iterdf)
+}
+
+
+# ==============================================================================
+
+
+# ==============================================================================
+# Adjoint-state sensitivity computation for 2D steady-state HT
+# ==============================================================================
+
+#' Solve the adjoint equation for a single observation point (2D steady-state)
+#'
+#' For the 2D steady-state groundwater flow equation
+#' \eqn{\nabla \cdot (T \nabla h) = Q}, the adjoint state \eqn{\lambda} for an
+#' observation at cell \code{iobs} satisfies:
+#' \deqn{\nabla \cdot (T \nabla \lambda) = \delta(\mathbf{x} - \mathbf{x}_{iobs})}
+#' with homogeneous (zero) boundary conditions.  This is the same PDE as the
+#' forward problem but with a unit source at the observation location instead
+#' of a pumping well.  The adjoint variable is used to compute the Jacobian
+#' (sensitivity) matrix via:
+#' \deqn{\frac{\partial h_{iobs}}{\partial (\ln T)_k} =
+#'       -T_k \, \nabla h|_k \cdot \nabla \lambda|_k \, \Delta x \, \Delta y}
+#'
+#' @param grid    grid list from \code{GenGrid()}.
+#' @param TT      transmissivity field \eqn{T} \code{[L^2/T]}, length-\code{n} vector.
+#' @param iobs    scalar integer, the flat element index of the observation point.
+#' @param lrw     real work array length for \code{steady.2D} (default 160000).
+#' @return Numeric vector of adjoint variable \eqn{\lambda} (length \code{n}).
+#' @keywords internal
+adjoint2D <- function(grid, TT, iobs, lrw = 160000) {
+  require('rootSolve')
+
+  n   <- grid$n
+  nx  <- grid$nx
+  ny  <- grid$ny
+  dx  <- grid$dx
+  dy  <- grid$dy
+
+  Tp <- if (length(TT) == 1) rep(TT, n) else TT
+  Sp <- rep(1, n)
+  Tpm <- matrix(Tp, nx, ny)
+  Spm <- matrix(Sp, nx, ny)
+
+  # Build the adjoint source: unit extraction at the observation cell
+  # The adjoint PDE has source +delta(x - x_obs) on the RHS.
+  # In the diffusion2D residual, Qp/(dx*dy*S) is subtracted from dY at the pump cell.
+  # For adjoint, we want a unit source, so we set Qp = dx*dy (S=1 for steady-state)
+  # and place it at the observation cell.
+
+  # Convert flat index iobs to (Nxp, Nyp)
+  Nxp <- ((iobs - 1) %% nx) + 1
+  Nyp <- ((iobs - 1) %/% nx) + 1
+
+  # Adjoint source: Qp = dx*dy so that Qp/(dx*dy*Spm) = 1 at the obs cell
+  Qp_adj <- dx * dy
+
+  para <- list(dx = dx, dy = dy, nx = nx, ny = ny,
+               Tpm = Tpm, Spm = Spm,
+               Qp = Qp_adj, Nxp = Nxp, Nyp = Nyp)
+
+  y_init <- rep(0, n)
+  s_adj <- steady.2D(y = y_init, parms = para,
+                     func = diffusion2D, dimens = c(nx, ny), lrw = lrw)$y
+
+  return(s_adj)
+}
+
+
+#' Compute the Jacobian (sensitivity) matrix via the adjoint-state method
+#'
+#' For 2D steady-state hydraulic tomography, computes the Jacobian matrix
+#' \eqn{\mathbf{J} = \partial \mathbf{h} / \partial (\ln \mathbf{T})}
+#' (dimension \code{nobs × nelem}) using the adjoint-state method.
+#'
+#' For each pumping test \eqn{j} and each observation \eqn{i}:
+#' \enumerate{
+#'   \item Solve the forward problem to obtain head field \eqn{h}
+#'   \item Solve the adjoint problem to obtain \eqn{\lambda_i}
+#'   \item Compute sensitivity:
+#'         \eqn{J_{ik} = -T_k \, (\nabla h|_k \cdot \nabla \lambda_i|_k) \, \Delta x \, \Delta y}
+#' }
+#'
+#' @param grid    grid list from \code{GenGrid()}.
+#' @param TT      transmissivity field \eqn{T} \code{[L^2/T]}, length-\code{n} vector.
+#' @param qHT     list of pumping test data frames (columns \code{Qp, x, y}).
+#' @param oHT     list of observation data frames (columns \code{data, x, y}).
+#' @param lrw     real work array length for \code{steady.2D} (default 160000).
+#' @return A matrix of dimension \code{nobs × nelem}.
+#' @examples
+#' # ---- 1. Setup grid and transmissivity field ----
+#' domain <- c(20, 20, 0, 20, 0, 20)
+#' grid   <- GenGrid(domain)
+#' set.seed(123)
+#' TT <- random2d(grid = grid, nsim = 1)$Tp
+#'
+#' # ---- 2. Define pumping tests and observations ----
+#' qHT <- list(
+#'   data.frame(Qp = 10, x = 10.5, y = 10.5),
+#'   data.frame(Qp = 10, x = 15.5, y = 15.5)
+#' )
+#' oHT <- list(
+#'   data.frame(data = -1, x = 5.5, y = 5.5),
+#'   data.frame(data = -1, x = 12.5, y = 12.5)
+#' )
+#'
+#' # ---- 3. Compute Jacobian ----
+#' J <- jacobian2D(grid = grid, TT = TT, qHT = qHT, oHT = oHT)
+#'
+#' # ---- 4. Inspect results ----
+#' # Jacobian dimensions: nobs × nelem
+#' dim(J)
+#' # Sensitivity map for the first observation (row 1)
+#' image(matrix(J[1, ], grid$nx, grid$ny),
+#'       main = "Sensitivity: obs 1")
+#' @export
+jacobian2D <- function(grid,
+                       TT,
+                       qHT = list(data.frame(Qp = 10, x = 20.5, y = 20.5)),
+                       oHT = list(data.frame(data = -1, x = 11, y = 11)),
+                       lrw = 160000) {
+
+  require('rootSolve')
+
+  nHT  <- length(qHT)
+  n    <- grid$n
+  nx   <- grid$nx
+  ny   <- grid$ny
+  dx   <- grid$dx
+  dy   <- grid$dy
+  dV   <- dx * dy   # cell volume (area in 2D)
+
+  # ---- Collect observation element indices and counts ----
+  loc_obsHT <- list()
+  nobs_per_test <- integer(nHT)
+  for (j in seq_len(nHT)) {
+    oinf <- oHT[[j]]
+    oelemdf <- getOelem(grid = grid, Oinf = oinf)
+    loc_obsHT[[j]] <- oelemdf$nelem
+    nobs_per_test[j] <- nrow(oinf)
+  }
+  nobs <- sum(nobs_per_test)
+
+  Tp <- if (length(TT) == 1) rep(TT, n) else TT
+
+  # ---- Pre-allocate Jacobian ----
+  J <- matrix(0, nrow = nobs, ncol = n)
+
+  # ---- Row offset tracker ----
+  row_offset <- 0
+
+  for (j in seq_len(nHT)) {
+    qinf <- qHT[[j]]
+    obs_elem <- loc_obsHT[[j]]
+    nlocal <- length(obs_elem)
+
+    # --- Forward solve for pumping test j ---
+    h_forward <- Fsteady2dsim(grid = grid, TT = Tp, Qinf = qinf, lrw = lrw)$solution
+    h_mat <- matrix(h_forward, nx, ny)
+
+    # --- Compute forward head gradients (cell-centred) ---
+    dhdx <- matrix(0, nx, ny)
+    dhdy <- matrix(0, nx, ny)
+
+    # Interior x-derivative (central difference)
+    if (nx > 1) {
+      dhdx[2:(nx - 1), ] <- (h_mat[3:nx, ] - h_mat[1:(nx - 2), ]) / (2 * dx)
+      dhdx[1, ]  <- (h_mat[2, ] - h_mat[1, ]) / dx
+      dhdx[nx, ] <- (h_mat[nx, ] - h_mat[nx - 1, ]) / dx
+    }
+
+    # Interior y-derivative (central difference)
+    if (ny > 1) {
+      dhdy[, 2:(ny - 1)] <- (h_mat[, 3:ny] - h_mat[, 1:(ny - 2)]) / (2 * dy)
+      dhdy[, 1]  <- (h_mat[, 2] - h_mat[, 1]) / dy
+      dhdy[, ny] <- (h_mat[, ny] - h_mat[, ny - 1]) / dy
+    }
+
+    # --- For each observation in this test, solve adjoint and compute sensitivity ---
+    for (i_local in seq_len(nlocal)) {
+      iobs <- obs_elem[i_local]
+      global_row <- row_offset + i_local
+
+      # Solve adjoint equation
+      lambda <- adjoint2D(grid = grid, TT = Tp, iobs = iobs, lrw = lrw)
+      lambda_mat <- matrix(lambda, nx, ny)
+
+      # Compute adjoint gradients
+      dldx <- matrix(0, nx, ny)
+      dldy <- matrix(0, nx, ny)
+
+      if (nx > 1) {
+        dldx[2:(nx - 1), ] <- (lambda_mat[3:nx, ] - lambda_mat[1:(nx - 2), ]) / (2 * dx)
+        dldx[1, ]  <- (lambda_mat[2, ] - lambda_mat[1, ]) / dx
+        dldx[nx, ] <- (lambda_mat[nx, ] - lambda_mat[nx - 1, ]) / dx
+      }
+      if (ny > 1) {
+        dldy[, 2:(ny - 1)] <- (lambda_mat[, 3:ny] - lambda_mat[, 1:(ny - 2)]) / (2 * dy)
+        dldy[, 1]  <- (lambda_mat[, 2] - lambda_mat[, 1]) / dy
+        dldy[, ny] <- (lambda_mat[, ny] - lambda_mat[, ny - 1]) / dy
+      }
+
+      # Sensitivity: J_{ik} = -T_k * (grad_h_k · grad_lambda_i_k) * dV
+      grad_dot <- as.vector(dhdx * dldx + dhdy * dldy)
+      J[global_row, ] <- -Tp * grad_dot * dV
+    }
+
+    row_offset <- row_offset + nlocal
+  }
+
+  return(J)
+}
+
+
+#' 2D Adjoint-based deterministic inversion for hydraulic tomography
+#'
+#' Performs deterministic Bayesian inversion to estimate the 2D
+#' log-transmissivity field \eqn{\ln T(\mathbf{x})} from hydraulic tomography
+#' (HT) data using the **adjoint-state method** to compute the Jacobian
+#' (sensitivity) matrix analytically, instead of using ensemble statistics
+#' as in the ESMDA-based \code{\link{Finverse3}}.
+#'
+#' The update follows the quasi-linear Bayesian formulation:
+#' \deqn{\Delta \mathbf{m} = (\mathbf{J}^\top \mathbf{R}^{-1} \mathbf{J} +
+#'       \mathbf{C}_{kk}^{-1})^{-1} \,
+#'       \mathbf{J}^\top \mathbf{R}^{-1} \,
+#'       (\mathbf{d}_{\text{obs}} - \mathbf{g}(\mathbf{m}))}
+#' where \eqn{\mathbf{J}} is the Jacobian from \code{\link{jacobian2D}},
+#' \eqn{\mathbf{R}} is the observation error covariance (assumed diagonal with
+#' variance \code{sigma2obs}), and \eqn{\mathbf{C}_{kk}} is the prior parameter
+#' covariance derived from the geostatistical model.
+#'
+#' A Levenberg-Marquardt damping parameter \code{lambda_lm} is added to the
+#' diagonal of the Hessian approximation for stability.
+#'
+#' @param domain   a 6-element vector \code{c(nx, ny, x1, x2, y1, y2)} \code{[L]}.
+#' @param grid     grid list from \code{GenGrid()}; generated from \code{domain}
+#'   if \code{NULL}.
+#' @param qHT      list of pumping test data frames (columns \code{Qp, x, y}).
+#' @param itermax  maximum number of iterations (default 5).
+#' @param rmsemin  minimum RMSE stopping criterion (default 0).
+#' @param oHT      list of observation data frames (columns \code{data, x, y}).
+#' @param lrw      real work array length for \code{steady.2D} (default 160000).
+#' @param sigma2obs observation error variance (default 1e-4).
+#' @param lambda_lm Levenberg-Marquardt damping parameter (default 1.0); decays
+#'   by \code{decay_lm} each iteration.
+#' @param decay_lm  decay factor for \code{lambda_lm} (default 2.0).
+#' @param geo      prior geostatistical parameters:
+#'   \code{list(me, var, geomod, anis, range, nugget)}.
+#' @param m0       initial log-T field, length \code{n} vector.  If \code{NULL}
+#'   (default), uses the prior mean \code{geo$me} everywhere.
+#' @param ifcor    logical; if \code{TRUE}, returns the Jacobian matrix and
+#'   forward response after the first iteration without performing the update.
+#' @return A list of per-iteration results, each a list with
+#'   \code{m} (log-T estimate), \code{h_sim} (simulated heads),
+#'   \code{rmse}, \code{l2}, \code{l1}, and \code{J} (Jacobian, first iteration
+#'   only).  When \code{ifcor = TRUE}, returns list(J = J, h_sim = h_sim).
+#' @export
+#' @examples
+#' \dontrun{
+#' set.seed(100)
+#' trueK <- random2d(nsim=1)
+#' TT <- trueK[,-c(1,2)]
+#' domain <- c(40,40,0,40,0,40)
+#' grid <- GenGrid(domain)
+#' Qinf1 <- data.frame(Qp=10, x=20.5, y=20.5)
+#' qHT <- list(test1 = Qinf1)
+#' trueh <- Fsteady2dsim(TT=TT, Qinf=Qinf1, domain=domain)
+#' locx <- c(15,18,22,25,30)
+#' locy <- c(15,18,22,25,30)
+#' loc <- expand.grid(x=locx, y=locy)
+#' Oinf1 <- data.frame(data=NA, x=loc$x, y=loc$y)
+#' Oinf1 <- samData(grid=grid, Oinf=Oinf1, h=trueh$solution)
+#' oHT <- list(test1 = Oinf1)
+#' result <- FinverseAdj(grid=grid, qHT=qHT, oHT=oHT, itermax=3)
+#' }
+FinverseAdj <- function(
+    domain      = c(40, 40, 0, 40, 0, 40),
+    grid        = NULL,
+    qHT         = list(data.frame(Qp = 10, x = 20.5, y = 20.5)),
+    itermax     = 5,
+    rmsemin     = 0,
+    oHT         = list(data.frame(data = -1, x = 11, y = 11)),
+    lrw         = 160000,
+    sigma2obs   = 1e-4,
+    lambda_lm   = 1.0,
+    decay_lm    = 2.0,
+    geo         = list(me = 0, var = 1, geomod = "Exp",
+                       anis = c(90, 1), range = 30, nugget = 0),
+    m0          = NULL,
+    ifcor       = FALSE) {
+
+  set.seed(200)
+  startTime <- Sys.time()
+
+  if (is.null(grid)) grid <- GenGrid(domain)
+
+  n <- grid$n
+  nHT <- length(qHT)
+
+  # ---- Extract observation data ----
+  trueobshHT <- list()
+  loc_obsHT  <- list()
+  for (i in seq_len(nHT)) {
+    oinf <- oHT[[i]]
+    oelemdf <- getOelem(grid = grid, Oinf = oinf)
+    loc_obsHT[[i]] <- oelemdf$nelem
+    trueobshHT[[i]] <- oinf$data
+  }
+  trueobsh <- unlist(trueobshHT)
+  nobs <- length(trueobsh)
+
+  # ---- Build prior covariance C_kk from geostatistical model ----
+  # Use the same variogram model as random2d to compute covariance
+  require('gstat')
+  xy <- grid$grid
+
+  # Compute prior covariance matrix analytically from variogram model
+  # C_kk(i,j) = sill - variogram(|x_i - x_j|)
+  dist_mat <- as.matrix(dist(xy))
+  if (geo$geomod == "Exp") {
+    C_kk <- geo$var * exp(-dist_mat / geo$range)
+    diag(C_kk) <- geo$var + geo$nugget
+  } else if (geo$geomod == "Gau") {
+    C_kk <- geo$var * exp(-(dist_mat / geo$range)^2)
+    diag(C_kk) <- geo$var + geo$nugget
+  } else if (geo$geomod == "Sph") {
+    hr <- dist_mat / geo$range
+    C_kk <- geo$var * (1 - 1.5 * hr + 0.5 * hr^3)
+    C_kk[hr > 1] <- 0
+    diag(C_kk) <- geo$var + geo$nugget
+  } else {
+    C_kk <- geo$var * exp(-dist_mat / geo$range)
+    diag(C_kk) <- geo$var + geo$nugget
+  }
+
+  # ---- Initial parameter estimate ----
+  if (is.null(m0)) {
+    m <- rep(geo$me, n)  # log-T
+  } else {
+    m <- m0
+  }
+  T_current <- exp(m)
+
+  # ---- Iteration loop ----
+  niter <- 1
+  rmse <- 1e10
+  iterdf <- list()
+
+  while (niter <= itermax && rmse > rmsemin) {
+
+    # --- Forward simulation at current T ---
+    h_sim_vec <- samHT(grid = grid, TT = T_current,
+                       qHT = qHT, oHT = oHT, lrw = lrw)
+
+    # --- Misfit ---
+    residual <- trueobsh - h_sim_vec
+    rmse <- sqrt(mean(residual^2))
+    l2 <- rmse
+    l1 <- mean(abs(residual))
+
+    msg <- paste('niter =', niter,
+                 'rmse =', round(rmse, 6),
+                 'l2 =', round(l2, 6),
+                 'l1 =', round(l1, 6),
+                 'lambda_lm =', round(lambda_lm, 4))
+    print(msg)
+
+    # --- Compute Jacobian ---
+    J <- jacobian2D(grid = grid, TT = T_current,
+                    qHT = qHT, oHT = oHT, lrw = lrw)
+
+    if (ifcor) {
+      print("ifcor = TRUE: returning Jacobian and simulated heads without update.")
+      return(list(J = J, h_sim = h_sim_vec))
+    }
+
+    # --- Compute update (dual / observation-space formulation) ---
+    # dm = C_kk * J^T * (J * C_kk * J^T + R + lambda_lm * I)^{-1} * residual
+    Jt <- t(J)                                     # nelem x nobs
+    JCJt <- J %*% C_kk %*% Jt                      # nobs x nobs
+    S <- JCJt + (sigma2obs + lambda_lm) * diag(nobs)
+
+    beta <- solve(S, residual)                     # nobs
+    dm <- as.vector(C_kk %*% Jt %*% beta)          # nelem
+
+    # --- Update parameters ---
+    m <- m + dm
+    T_current <- exp(m)
+
+    # --- Store iteration results ---
+    iterdf[[niter]] <- list(
+      m       = m,
+      h_sim   = h_sim_vec,
+      rmse    = rmse,
+      l2      = l2,
+      l1      = l1
+    )
+
+    if (niter == 1) {
+      iterdf[[niter]]$J <- J
+      print("--- time for one iteration ---")
+      print(difftime(Sys.time(), startTime))
+    }
+
+    niter <- niter + 1
+    lambda_lm <- lambda_lm / decay_lm
   }
 
   print("--- total time ---")
@@ -1537,6 +2613,417 @@ Finverse3DTr <- function(
 
 
 # ==============================================================================
+
+
+# ==============================================================================
+# Adjoint-state sensitivity computation for 2D steady-state HT
+# ==============================================================================
+
+#' Solve the adjoint equation for a single observation point (2D steady-state)
+#'
+#' For the 2D steady-state groundwater flow equation
+#' \eqn{\nabla \cdot (T \nabla h) = Q}, the adjoint state \eqn{\lambda} for an
+#' observation at cell \code{iobs} satisfies:
+#' \deqn{\nabla \cdot (T \nabla \lambda) = \delta(\mathbf{x} - \mathbf{x}_{iobs})}
+#' with homogeneous (zero) boundary conditions.  This is the same PDE as the
+#' forward problem but with a unit source at the observation location instead
+#' of a pumping well.  The adjoint variable is used to compute the Jacobian
+#' (sensitivity) matrix via:
+#' \deqn{\frac{\partial h_{iobs}}{\partial (\ln T)_k} =
+#'       -T_k \, \nabla h|_k \cdot \nabla \lambda|_k \, \Delta x \, \Delta y}
+#'
+#' @param grid    grid list from \code{GenGrid()}.
+#' @param TT      transmissivity field \eqn{T} \code{[L^2/T]}, length-\code{n} vector.
+#' @param iobs    scalar integer, the flat element index of the observation point.
+#' @param lrw     real work array length for \code{steady.2D} (default 160000).
+#' @return Numeric vector of adjoint variable \eqn{\lambda} (length \code{n}).
+#' @keywords internal
+adjoint2D <- function(grid, TT, iobs, lrw = 160000) {
+  require('rootSolve')
+
+  n   <- grid$n
+  nx  <- grid$nx
+  ny  <- grid$ny
+  dx  <- grid$dx
+  dy  <- grid$dy
+
+  Tp <- if (length(TT) == 1) rep(TT, n) else TT
+  Sp <- rep(1, n)
+  Tpm <- matrix(Tp, nx, ny)
+  Spm <- matrix(Sp, nx, ny)
+
+  # Build the adjoint source: unit extraction at the observation cell
+  # The adjoint PDE has source +delta(x - x_obs) on the RHS.
+  # In the diffusion2D residual, Qp/(dx*dy*S) is subtracted from dY at the pump cell.
+  # For adjoint, we want a unit source, so we set Qp = dx*dy (S=1 for steady-state)
+  # and place it at the observation cell.
+
+  # Convert flat index iobs to (Nxp, Nyp)
+  Nxp <- ((iobs - 1) %% nx) + 1
+  Nyp <- ((iobs - 1) %/% nx) + 1
+
+  # Adjoint source: Qp = dx*dy so that Qp/(dx*dy*Spm) = 1 at the obs cell
+  Qp_adj <- dx * dy
+
+  para <- list(dx = dx, dy = dy, nx = nx, ny = ny,
+               Tpm = Tpm, Spm = Spm,
+               Qp = Qp_adj, Nxp = Nxp, Nyp = Nyp)
+
+  y_init <- rep(0, n)
+  s_adj <- steady.2D(y = y_init, parms = para,
+                     func = diffusion2D, dimens = c(nx, ny), lrw = lrw)$y
+
+  return(s_adj)
+}
+
+
+#' Compute the Jacobian (sensitivity) matrix via the adjoint-state method
+#'
+#' For 2D steady-state hydraulic tomography, computes the Jacobian matrix
+#' \eqn{\mathbf{J} = \partial \mathbf{h} / \partial (\ln \mathbf{T})}
+#' (dimension \code{nobs × nelem}) using the adjoint-state method.
+#'
+#' For each pumping test \eqn{j} and each observation \eqn{i}:
+#' \enumerate{
+#'   \item Solve the forward problem to obtain head field \eqn{h}
+#'   \item Solve the adjoint problem to obtain \eqn{\lambda_i}
+#'   \item Compute sensitivity:
+#'         \eqn{J_{ik} = -T_k \, (\nabla h|_k \cdot \nabla \lambda_i|_k) \, \Delta x \, \Delta y}
+#' }
+#'
+#' @param grid    grid list from \code{GenGrid()}.
+#' @param TT      transmissivity field \eqn{T} \code{[L^2/T]}, length-\code{n} vector.
+#' @param qHT     list of pumping test data frames (columns \code{Qp, x, y}).
+#' @param oHT     list of observation data frames (columns \code{data, x, y}).
+#' @param lrw     real work array length for \code{steady.2D} (default 160000).
+#' @return A matrix of dimension \code{nobs × nelem}.
+#' @examples
+#' # ---- 1. Setup grid and transmissivity field ----
+#' domain <- c(20, 20, 0, 20, 0, 20)
+#' grid   <- GenGrid(domain)
+#' set.seed(123)
+#' TT <- random2d(grid = grid, nsim = 1)$Tp
+#'
+#' # ---- 2. Define pumping tests and observations ----
+#' qHT <- list(
+#'   data.frame(Qp = 10, x = 10.5, y = 10.5),
+#'   data.frame(Qp = 10, x = 15.5, y = 15.5)
+#' )
+#' oHT <- list(
+#'   data.frame(data = -1, x = 5.5, y = 5.5),
+#'   data.frame(data = -1, x = 12.5, y = 12.5)
+#' )
+#'
+#' # ---- 3. Compute Jacobian ----
+#' J <- jacobian2D(grid = grid, TT = TT, qHT = qHT, oHT = oHT)
+#'
+#' # ---- 4. Inspect results ----
+#' # Jacobian dimensions: nobs × nelem
+#' dim(J)
+#' # Sensitivity map for the first observation (row 1)
+#' image(matrix(J[1, ], grid$nx, grid$ny),
+#'       main = "Sensitivity: obs 1")
+#' @export
+jacobian2D <- function(grid,
+                       TT,
+                       qHT = list(data.frame(Qp = 10, x = 20.5, y = 20.5)),
+                       oHT = list(data.frame(data = -1, x = 11, y = 11)),
+                       lrw = 160000) {
+
+  require('rootSolve')
+
+  nHT  <- length(qHT)
+  n    <- grid$n
+  nx   <- grid$nx
+  ny   <- grid$ny
+  dx   <- grid$dx
+  dy   <- grid$dy
+  dV   <- dx * dy   # cell volume (area in 2D)
+
+  # ---- Collect observation element indices and counts ----
+  loc_obsHT <- list()
+  nobs_per_test <- integer(nHT)
+  for (j in seq_len(nHT)) {
+    oinf <- oHT[[j]]
+    oelemdf <- getOelem(grid = grid, Oinf = oinf)
+    loc_obsHT[[j]] <- oelemdf$nelem
+    nobs_per_test[j] <- nrow(oinf)
+  }
+  nobs <- sum(nobs_per_test)
+
+  Tp <- if (length(TT) == 1) rep(TT, n) else TT
+
+  # ---- Pre-allocate Jacobian ----
+  J <- matrix(0, nrow = nobs, ncol = n)
+
+  # ---- Row offset tracker ----
+  row_offset <- 0
+
+  for (j in seq_len(nHT)) {
+    qinf <- qHT[[j]]
+    obs_elem <- loc_obsHT[[j]]
+    nlocal <- length(obs_elem)
+
+    # --- Forward solve for pumping test j ---
+    h_forward <- Fsteady2dsim(grid = grid, TT = Tp, Qinf = qinf, lrw = lrw)$solution
+    h_mat <- matrix(h_forward, nx, ny)
+
+    # --- Compute forward head gradients (cell-centred) ---
+    dhdx <- matrix(0, nx, ny)
+    dhdy <- matrix(0, nx, ny)
+
+    # Interior x-derivative (central difference)
+    if (nx > 1) {
+      dhdx[2:(nx - 1), ] <- (h_mat[3:nx, ] - h_mat[1:(nx - 2), ]) / (2 * dx)
+      dhdx[1, ]  <- (h_mat[2, ] - h_mat[1, ]) / dx
+      dhdx[nx, ] <- (h_mat[nx, ] - h_mat[nx - 1, ]) / dx
+    }
+
+    # Interior y-derivative (central difference)
+    if (ny > 1) {
+      dhdy[, 2:(ny - 1)] <- (h_mat[, 3:ny] - h_mat[, 1:(ny - 2)]) / (2 * dy)
+      dhdy[, 1]  <- (h_mat[, 2] - h_mat[, 1]) / dy
+      dhdy[, ny] <- (h_mat[, ny] - h_mat[, ny - 1]) / dy
+    }
+
+    # --- For each observation in this test, solve adjoint and compute sensitivity ---
+    for (i_local in seq_len(nlocal)) {
+      iobs <- obs_elem[i_local]
+      global_row <- row_offset + i_local
+
+      # Solve adjoint equation
+      lambda <- adjoint2D(grid = grid, TT = Tp, iobs = iobs, lrw = lrw)
+      lambda_mat <- matrix(lambda, nx, ny)
+
+      # Compute adjoint gradients
+      dldx <- matrix(0, nx, ny)
+      dldy <- matrix(0, nx, ny)
+
+      if (nx > 1) {
+        dldx[2:(nx - 1), ] <- (lambda_mat[3:nx, ] - lambda_mat[1:(nx - 2), ]) / (2 * dx)
+        dldx[1, ]  <- (lambda_mat[2, ] - lambda_mat[1, ]) / dx
+        dldx[nx, ] <- (lambda_mat[nx, ] - lambda_mat[nx - 1, ]) / dx
+      }
+      if (ny > 1) {
+        dldy[, 2:(ny - 1)] <- (lambda_mat[, 3:ny] - lambda_mat[, 1:(ny - 2)]) / (2 * dy)
+        dldy[, 1]  <- (lambda_mat[, 2] - lambda_mat[, 1]) / dy
+        dldy[, ny] <- (lambda_mat[, ny] - lambda_mat[, ny - 1]) / dy
+      }
+
+      # Sensitivity: J_{ik} = -T_k * (grad_h_k · grad_lambda_i_k) * dV
+      grad_dot <- as.vector(dhdx * dldx + dhdy * dldy)
+      J[global_row, ] <- -Tp * grad_dot * dV
+    }
+
+    row_offset <- row_offset + nlocal
+  }
+
+  return(J)
+}
+
+
+#' 2D Adjoint-based deterministic inversion for hydraulic tomography
+#'
+#' Performs deterministic Bayesian inversion to estimate the 2D
+#' log-transmissivity field \eqn{\ln T(\mathbf{x})} from hydraulic tomography
+#' (HT) data using the **adjoint-state method** to compute the Jacobian
+#' (sensitivity) matrix analytically, instead of using ensemble statistics
+#' as in the ESMDA-based \code{\link{Finverse3}}.
+#'
+#' The update follows the quasi-linear Bayesian formulation:
+#' \deqn{\Delta \mathbf{m} = (\mathbf{J}^\top \mathbf{R}^{-1} \mathbf{J} +
+#'       \mathbf{C}_{kk}^{-1})^{-1} \,
+#'       \mathbf{J}^\top \mathbf{R}^{-1} \,
+#'       (\mathbf{d}_{\text{obs}} - \mathbf{g}(\mathbf{m}))}
+#' where \eqn{\mathbf{J}} is the Jacobian from \code{\link{jacobian2D}},
+#' \eqn{\mathbf{R}} is the observation error covariance (assumed diagonal with
+#' variance \code{sigma2obs}), and \eqn{\mathbf{C}_{kk}} is the prior parameter
+#' covariance derived from the geostatistical model.
+#'
+#' A Levenberg-Marquardt damping parameter \code{lambda_lm} is added to the
+#' diagonal of the Hessian approximation for stability.
+#'
+#' @param domain   a 6-element vector \code{c(nx, ny, x1, x2, y1, y2)} \code{[L]}.
+#' @param grid     grid list from \code{GenGrid()}; generated from \code{domain}
+#'   if \code{NULL}.
+#' @param qHT      list of pumping test data frames (columns \code{Qp, x, y}).
+#' @param itermax  maximum number of iterations (default 5).
+#' @param rmsemin  minimum RMSE stopping criterion (default 0).
+#' @param oHT      list of observation data frames (columns \code{data, x, y}).
+#' @param lrw      real work array length for \code{steady.2D} (default 160000).
+#' @param sigma2obs observation error variance (default 1e-4).
+#' @param lambda_lm Levenberg-Marquardt damping parameter (default 1.0); decays
+#'   by \code{decay_lm} each iteration.
+#' @param decay_lm  decay factor for \code{lambda_lm} (default 2.0).
+#' @param geo      prior geostatistical parameters:
+#'   \code{list(me, var, geomod, anis, range, nugget)}.
+#' @param m0       initial log-T field, length \code{n} vector.  If \code{NULL}
+#'   (default), uses the prior mean \code{geo$me} everywhere.
+#' @param ifcor    logical; if \code{TRUE}, returns the Jacobian matrix and
+#'   forward response after the first iteration without performing the update.
+#' @return A list of per-iteration results, each a list with
+#'   \code{m} (log-T estimate), \code{h_sim} (simulated heads),
+#'   \code{rmse}, \code{l2}, \code{l1}, and \code{J} (Jacobian, first iteration
+#'   only).  When \code{ifcor = TRUE}, returns list(J = J, h_sim = h_sim).
+#' @export
+#' @examples
+#' \dontrun{
+#' set.seed(100)
+#' trueK <- random2d(nsim=1)
+#' TT <- trueK[,-c(1,2)]
+#' domain <- c(40,40,0,40,0,40)
+#' grid <- GenGrid(domain)
+#' Qinf1 <- data.frame(Qp=10, x=20.5, y=20.5)
+#' qHT <- list(test1 = Qinf1)
+#' trueh <- Fsteady2dsim(TT=TT, Qinf=Qinf1, domain=domain)
+#' locx <- c(15,18,22,25,30)
+#' locy <- c(15,18,22,25,30)
+#' loc <- expand.grid(x=locx, y=locy)
+#' Oinf1 <- data.frame(data=NA, x=loc$x, y=loc$y)
+#' Oinf1 <- samData(grid=grid, Oinf=Oinf1, h=trueh$solution)
+#' oHT <- list(test1 = Oinf1)
+#' result <- FinverseAdj(grid=grid, qHT=qHT, oHT=oHT, itermax=3)
+#' }
+FinverseAdj <- function(
+    domain      = c(40, 40, 0, 40, 0, 40),
+    grid        = NULL,
+    qHT         = list(data.frame(Qp = 10, x = 20.5, y = 20.5)),
+    itermax     = 5,
+    rmsemin     = 0,
+    oHT         = list(data.frame(data = -1, x = 11, y = 11)),
+    lrw         = 160000,
+    sigma2obs   = 1e-4,
+    lambda_lm   = 1.0,
+    decay_lm    = 2.0,
+    geo         = list(me = 0, var = 1, geomod = "Exp",
+                       anis = c(90, 1), range = 30, nugget = 0),
+    m0          = NULL,
+    ifcor       = FALSE) {
+
+  set.seed(200)
+  startTime <- Sys.time()
+
+  if (is.null(grid)) grid <- GenGrid(domain)
+
+  n <- grid$n
+  nHT <- length(qHT)
+
+  # ---- Extract observation data ----
+  trueobshHT <- list()
+  loc_obsHT  <- list()
+  for (i in seq_len(nHT)) {
+    oinf <- oHT[[i]]
+    oelemdf <- getOelem(grid = grid, Oinf = oinf)
+    loc_obsHT[[i]] <- oelemdf$nelem
+    trueobshHT[[i]] <- oinf$data
+  }
+  trueobsh <- unlist(trueobshHT)
+  nobs <- length(trueobsh)
+
+  # ---- Build prior covariance C_kk from geostatistical model ----
+  # Use the same variogram model as random2d to compute covariance
+  require('gstat')
+  xy <- grid$grid
+
+  # Compute prior covariance matrix analytically from variogram model
+  # C_kk(i,j) = sill - variogram(|x_i - x_j|)
+  dist_mat <- as.matrix(dist(xy))
+  if (geo$geomod == "Exp") {
+    C_kk <- geo$var * exp(-dist_mat / geo$range)
+    diag(C_kk) <- geo$var + geo$nugget
+  } else if (geo$geomod == "Gau") {
+    C_kk <- geo$var * exp(-(dist_mat / geo$range)^2)
+    diag(C_kk) <- geo$var + geo$nugget
+  } else if (geo$geomod == "Sph") {
+    hr <- dist_mat / geo$range
+    C_kk <- geo$var * (1 - 1.5 * hr + 0.5 * hr^3)
+    C_kk[hr > 1] <- 0
+    diag(C_kk) <- geo$var + geo$nugget
+  } else {
+    C_kk <- geo$var * exp(-dist_mat / geo$range)
+    diag(C_kk) <- geo$var + geo$nugget
+  }
+
+  # ---- Initial parameter estimate ----
+  if (is.null(m0)) {
+    m <- rep(geo$me, n)  # log-T
+  } else {
+    m <- m0
+  }
+  T_current <- exp(m)
+
+  # ---- Iteration loop ----
+  niter <- 1
+  rmse <- 1e10
+  iterdf <- list()
+
+  while (niter <= itermax && rmse > rmsemin) {
+
+    # --- Forward simulation at current T ---
+    h_sim_vec <- samHT(grid = grid, TT = T_current,
+                       qHT = qHT, oHT = oHT, lrw = lrw)
+
+    # --- Misfit ---
+    residual <- trueobsh - h_sim_vec
+    rmse <- sqrt(mean(residual^2))
+    l2 <- rmse
+    l1 <- mean(abs(residual))
+
+    msg <- paste('niter =', niter,
+                 'rmse =', round(rmse, 6),
+                 'l2 =', round(l2, 6),
+                 'l1 =', round(l1, 6),
+                 'lambda_lm =', round(lambda_lm, 4))
+    print(msg)
+
+    # --- Compute Jacobian ---
+    J <- jacobian2D(grid = grid, TT = T_current,
+                    qHT = qHT, oHT = oHT, lrw = lrw)
+
+    if (ifcor) {
+      print("ifcor = TRUE: returning Jacobian and simulated heads without update.")
+      return(list(J = J, h_sim = h_sim_vec))
+    }
+
+    # --- Compute update (dual / observation-space formulation) ---
+    # dm = C_kk * J^T * (J * C_kk * J^T + R + lambda_lm * I)^{-1} * residual
+    Jt <- t(J)                                     # nelem x nobs
+    JCJt <- J %*% C_kk %*% Jt                      # nobs x nobs
+    S <- JCJt + (sigma2obs + lambda_lm) * diag(nobs)
+
+    beta <- solve(S, residual)                     # nobs
+    dm <- as.vector(C_kk %*% Jt %*% beta)          # nelem
+
+    # --- Update parameters ---
+    m <- m + dm
+    T_current <- exp(m)
+
+    # --- Store iteration results ---
+    iterdf[[niter]] <- list(
+      m       = m,
+      h_sim   = h_sim_vec,
+      rmse    = rmse,
+      l2      = l2,
+      l1      = l1
+    )
+
+    if (niter == 1) {
+      iterdf[[niter]]$J <- J
+      print("--- time for one iteration ---")
+      print(difftime(Sys.time(), startTime))
+    }
+
+    niter <- niter + 1
+    lambda_lm <- lambda_lm / decay_lm
+  }
+
+  print("--- total time ---")
+  print(difftime(Sys.time(), startTime))
+  return(iterdf)
+}
+
+
+# ==============================================================================
 # 3D Transient HT — Well-Screen (vertical interval) Inverse Functions
 # ==============================================================================
 
@@ -1804,6 +3291,417 @@ Finverse3DTrScreen <- function(
 
     niter <- niter + 1
     mul   <- mul / decay
+  }
+
+  print("--- total time ---")
+  print(difftime(Sys.time(), startTime))
+  return(iterdf)
+}
+
+
+# ==============================================================================
+
+
+# ==============================================================================
+# Adjoint-state sensitivity computation for 2D steady-state HT
+# ==============================================================================
+
+#' Solve the adjoint equation for a single observation point (2D steady-state)
+#'
+#' For the 2D steady-state groundwater flow equation
+#' \eqn{\nabla \cdot (T \nabla h) = Q}, the adjoint state \eqn{\lambda} for an
+#' observation at cell \code{iobs} satisfies:
+#' \deqn{\nabla \cdot (T \nabla \lambda) = \delta(\mathbf{x} - \mathbf{x}_{iobs})}
+#' with homogeneous (zero) boundary conditions.  This is the same PDE as the
+#' forward problem but with a unit source at the observation location instead
+#' of a pumping well.  The adjoint variable is used to compute the Jacobian
+#' (sensitivity) matrix via:
+#' \deqn{\frac{\partial h_{iobs}}{\partial (\ln T)_k} =
+#'       -T_k \, \nabla h|_k \cdot \nabla \lambda|_k \, \Delta x \, \Delta y}
+#'
+#' @param grid    grid list from \code{GenGrid()}.
+#' @param TT      transmissivity field \eqn{T} \code{[L^2/T]}, length-\code{n} vector.
+#' @param iobs    scalar integer, the flat element index of the observation point.
+#' @param lrw     real work array length for \code{steady.2D} (default 160000).
+#' @return Numeric vector of adjoint variable \eqn{\lambda} (length \code{n}).
+#' @keywords internal
+adjoint2D <- function(grid, TT, iobs, lrw = 160000) {
+  require('rootSolve')
+
+  n   <- grid$n
+  nx  <- grid$nx
+  ny  <- grid$ny
+  dx  <- grid$dx
+  dy  <- grid$dy
+
+  Tp <- if (length(TT) == 1) rep(TT, n) else TT
+  Sp <- rep(1, n)
+  Tpm <- matrix(Tp, nx, ny)
+  Spm <- matrix(Sp, nx, ny)
+
+  # Build the adjoint source: unit extraction at the observation cell
+  # The adjoint PDE has source +delta(x - x_obs) on the RHS.
+  # In the diffusion2D residual, Qp/(dx*dy*S) is subtracted from dY at the pump cell.
+  # For adjoint, we want a unit source, so we set Qp = dx*dy (S=1 for steady-state)
+  # and place it at the observation cell.
+
+  # Convert flat index iobs to (Nxp, Nyp)
+  Nxp <- ((iobs - 1) %% nx) + 1
+  Nyp <- ((iobs - 1) %/% nx) + 1
+
+  # Adjoint source: Qp = dx*dy so that Qp/(dx*dy*Spm) = 1 at the obs cell
+  Qp_adj <- dx * dy
+
+  para <- list(dx = dx, dy = dy, nx = nx, ny = ny,
+               Tpm = Tpm, Spm = Spm,
+               Qp = Qp_adj, Nxp = Nxp, Nyp = Nyp)
+
+  y_init <- rep(0, n)
+  s_adj <- steady.2D(y = y_init, parms = para,
+                     func = diffusion2D, dimens = c(nx, ny), lrw = lrw)$y
+
+  return(s_adj)
+}
+
+
+#' Compute the Jacobian (sensitivity) matrix via the adjoint-state method
+#'
+#' For 2D steady-state hydraulic tomography, computes the Jacobian matrix
+#' \eqn{\mathbf{J} = \partial \mathbf{h} / \partial (\ln \mathbf{T})}
+#' (dimension \code{nobs × nelem}) using the adjoint-state method.
+#'
+#' For each pumping test \eqn{j} and each observation \eqn{i}:
+#' \enumerate{
+#'   \item Solve the forward problem to obtain head field \eqn{h}
+#'   \item Solve the adjoint problem to obtain \eqn{\lambda_i}
+#'   \item Compute sensitivity:
+#'         \eqn{J_{ik} = -T_k \, (\nabla h|_k \cdot \nabla \lambda_i|_k) \, \Delta x \, \Delta y}
+#' }
+#'
+#' @param grid    grid list from \code{GenGrid()}.
+#' @param TT      transmissivity field \eqn{T} \code{[L^2/T]}, length-\code{n} vector.
+#' @param qHT     list of pumping test data frames (columns \code{Qp, x, y}).
+#' @param oHT     list of observation data frames (columns \code{data, x, y}).
+#' @param lrw     real work array length for \code{steady.2D} (default 160000).
+#' @return A matrix of dimension \code{nobs × nelem}.
+#' @examples
+#' # ---- 1. Setup grid and transmissivity field ----
+#' domain <- c(20, 20, 0, 20, 0, 20)
+#' grid   <- GenGrid(domain)
+#' set.seed(123)
+#' TT <- random2d(grid = grid, nsim = 1)$Tp
+#'
+#' # ---- 2. Define pumping tests and observations ----
+#' qHT <- list(
+#'   data.frame(Qp = 10, x = 10.5, y = 10.5),
+#'   data.frame(Qp = 10, x = 15.5, y = 15.5)
+#' )
+#' oHT <- list(
+#'   data.frame(data = -1, x = 5.5, y = 5.5),
+#'   data.frame(data = -1, x = 12.5, y = 12.5)
+#' )
+#'
+#' # ---- 3. Compute Jacobian ----
+#' J <- jacobian2D(grid = grid, TT = TT, qHT = qHT, oHT = oHT)
+#'
+#' # ---- 4. Inspect results ----
+#' # Jacobian dimensions: nobs × nelem
+#' dim(J)
+#' # Sensitivity map for the first observation (row 1)
+#' image(matrix(J[1, ], grid$nx, grid$ny),
+#'       main = "Sensitivity: obs 1")
+#' @export
+jacobian2D <- function(grid,
+                       TT,
+                       qHT = list(data.frame(Qp = 10, x = 20.5, y = 20.5)),
+                       oHT = list(data.frame(data = -1, x = 11, y = 11)),
+                       lrw = 160000) {
+
+  require('rootSolve')
+
+  nHT  <- length(qHT)
+  n    <- grid$n
+  nx   <- grid$nx
+  ny   <- grid$ny
+  dx   <- grid$dx
+  dy   <- grid$dy
+  dV   <- dx * dy   # cell volume (area in 2D)
+
+  # ---- Collect observation element indices and counts ----
+  loc_obsHT <- list()
+  nobs_per_test <- integer(nHT)
+  for (j in seq_len(nHT)) {
+    oinf <- oHT[[j]]
+    oelemdf <- getOelem(grid = grid, Oinf = oinf)
+    loc_obsHT[[j]] <- oelemdf$nelem
+    nobs_per_test[j] <- nrow(oinf)
+  }
+  nobs <- sum(nobs_per_test)
+
+  Tp <- if (length(TT) == 1) rep(TT, n) else TT
+
+  # ---- Pre-allocate Jacobian ----
+  J <- matrix(0, nrow = nobs, ncol = n)
+
+  # ---- Row offset tracker ----
+  row_offset <- 0
+
+  for (j in seq_len(nHT)) {
+    qinf <- qHT[[j]]
+    obs_elem <- loc_obsHT[[j]]
+    nlocal <- length(obs_elem)
+
+    # --- Forward solve for pumping test j ---
+    h_forward <- Fsteady2dsim(grid = grid, TT = Tp, Qinf = qinf, lrw = lrw)$solution
+    h_mat <- matrix(h_forward, nx, ny)
+
+    # --- Compute forward head gradients (cell-centred) ---
+    dhdx <- matrix(0, nx, ny)
+    dhdy <- matrix(0, nx, ny)
+
+    # Interior x-derivative (central difference)
+    if (nx > 1) {
+      dhdx[2:(nx - 1), ] <- (h_mat[3:nx, ] - h_mat[1:(nx - 2), ]) / (2 * dx)
+      dhdx[1, ]  <- (h_mat[2, ] - h_mat[1, ]) / dx
+      dhdx[nx, ] <- (h_mat[nx, ] - h_mat[nx - 1, ]) / dx
+    }
+
+    # Interior y-derivative (central difference)
+    if (ny > 1) {
+      dhdy[, 2:(ny - 1)] <- (h_mat[, 3:ny] - h_mat[, 1:(ny - 2)]) / (2 * dy)
+      dhdy[, 1]  <- (h_mat[, 2] - h_mat[, 1]) / dy
+      dhdy[, ny] <- (h_mat[, ny] - h_mat[, ny - 1]) / dy
+    }
+
+    # --- For each observation in this test, solve adjoint and compute sensitivity ---
+    for (i_local in seq_len(nlocal)) {
+      iobs <- obs_elem[i_local]
+      global_row <- row_offset + i_local
+
+      # Solve adjoint equation
+      lambda <- adjoint2D(grid = grid, TT = Tp, iobs = iobs, lrw = lrw)
+      lambda_mat <- matrix(lambda, nx, ny)
+
+      # Compute adjoint gradients
+      dldx <- matrix(0, nx, ny)
+      dldy <- matrix(0, nx, ny)
+
+      if (nx > 1) {
+        dldx[2:(nx - 1), ] <- (lambda_mat[3:nx, ] - lambda_mat[1:(nx - 2), ]) / (2 * dx)
+        dldx[1, ]  <- (lambda_mat[2, ] - lambda_mat[1, ]) / dx
+        dldx[nx, ] <- (lambda_mat[nx, ] - lambda_mat[nx - 1, ]) / dx
+      }
+      if (ny > 1) {
+        dldy[, 2:(ny - 1)] <- (lambda_mat[, 3:ny] - lambda_mat[, 1:(ny - 2)]) / (2 * dy)
+        dldy[, 1]  <- (lambda_mat[, 2] - lambda_mat[, 1]) / dy
+        dldy[, ny] <- (lambda_mat[, ny] - lambda_mat[, ny - 1]) / dy
+      }
+
+      # Sensitivity: J_{ik} = -T_k * (grad_h_k · grad_lambda_i_k) * dV
+      grad_dot <- as.vector(dhdx * dldx + dhdy * dldy)
+      J[global_row, ] <- -Tp * grad_dot * dV
+    }
+
+    row_offset <- row_offset + nlocal
+  }
+
+  return(J)
+}
+
+
+#' 2D Adjoint-based deterministic inversion for hydraulic tomography
+#'
+#' Performs deterministic Bayesian inversion to estimate the 2D
+#' log-transmissivity field \eqn{\ln T(\mathbf{x})} from hydraulic tomography
+#' (HT) data using the **adjoint-state method** to compute the Jacobian
+#' (sensitivity) matrix analytically, instead of using ensemble statistics
+#' as in the ESMDA-based \code{\link{Finverse3}}.
+#'
+#' The update follows the quasi-linear Bayesian formulation:
+#' \deqn{\Delta \mathbf{m} = (\mathbf{J}^\top \mathbf{R}^{-1} \mathbf{J} +
+#'       \mathbf{C}_{kk}^{-1})^{-1} \,
+#'       \mathbf{J}^\top \mathbf{R}^{-1} \,
+#'       (\mathbf{d}_{\text{obs}} - \mathbf{g}(\mathbf{m}))}
+#' where \eqn{\mathbf{J}} is the Jacobian from \code{\link{jacobian2D}},
+#' \eqn{\mathbf{R}} is the observation error covariance (assumed diagonal with
+#' variance \code{sigma2obs}), and \eqn{\mathbf{C}_{kk}} is the prior parameter
+#' covariance derived from the geostatistical model.
+#'
+#' A Levenberg-Marquardt damping parameter \code{lambda_lm} is added to the
+#' diagonal of the Hessian approximation for stability.
+#'
+#' @param domain   a 6-element vector \code{c(nx, ny, x1, x2, y1, y2)} \code{[L]}.
+#' @param grid     grid list from \code{GenGrid()}; generated from \code{domain}
+#'   if \code{NULL}.
+#' @param qHT      list of pumping test data frames (columns \code{Qp, x, y}).
+#' @param itermax  maximum number of iterations (default 5).
+#' @param rmsemin  minimum RMSE stopping criterion (default 0).
+#' @param oHT      list of observation data frames (columns \code{data, x, y}).
+#' @param lrw      real work array length for \code{steady.2D} (default 160000).
+#' @param sigma2obs observation error variance (default 1e-4).
+#' @param lambda_lm Levenberg-Marquardt damping parameter (default 1.0); decays
+#'   by \code{decay_lm} each iteration.
+#' @param decay_lm  decay factor for \code{lambda_lm} (default 2.0).
+#' @param geo      prior geostatistical parameters:
+#'   \code{list(me, var, geomod, anis, range, nugget)}.
+#' @param m0       initial log-T field, length \code{n} vector.  If \code{NULL}
+#'   (default), uses the prior mean \code{geo$me} everywhere.
+#' @param ifcor    logical; if \code{TRUE}, returns the Jacobian matrix and
+#'   forward response after the first iteration without performing the update.
+#' @return A list of per-iteration results, each a list with
+#'   \code{m} (log-T estimate), \code{h_sim} (simulated heads),
+#'   \code{rmse}, \code{l2}, \code{l1}, and \code{J} (Jacobian, first iteration
+#'   only).  When \code{ifcor = TRUE}, returns list(J = J, h_sim = h_sim).
+#' @export
+#' @examples
+#' \dontrun{
+#' set.seed(100)
+#' trueK <- random2d(nsim=1)
+#' TT <- trueK[,-c(1,2)]
+#' domain <- c(40,40,0,40,0,40)
+#' grid <- GenGrid(domain)
+#' Qinf1 <- data.frame(Qp=10, x=20.5, y=20.5)
+#' qHT <- list(test1 = Qinf1)
+#' trueh <- Fsteady2dsim(TT=TT, Qinf=Qinf1, domain=domain)
+#' locx <- c(15,18,22,25,30)
+#' locy <- c(15,18,22,25,30)
+#' loc <- expand.grid(x=locx, y=locy)
+#' Oinf1 <- data.frame(data=NA, x=loc$x, y=loc$y)
+#' Oinf1 <- samData(grid=grid, Oinf=Oinf1, h=trueh$solution)
+#' oHT <- list(test1 = Oinf1)
+#' result <- FinverseAdj(grid=grid, qHT=qHT, oHT=oHT, itermax=3)
+#' }
+FinverseAdj <- function(
+    domain      = c(40, 40, 0, 40, 0, 40),
+    grid        = NULL,
+    qHT         = list(data.frame(Qp = 10, x = 20.5, y = 20.5)),
+    itermax     = 5,
+    rmsemin     = 0,
+    oHT         = list(data.frame(data = -1, x = 11, y = 11)),
+    lrw         = 160000,
+    sigma2obs   = 1e-4,
+    lambda_lm   = 1.0,
+    decay_lm    = 2.0,
+    geo         = list(me = 0, var = 1, geomod = "Exp",
+                       anis = c(90, 1), range = 30, nugget = 0),
+    m0          = NULL,
+    ifcor       = FALSE) {
+
+  set.seed(200)
+  startTime <- Sys.time()
+
+  if (is.null(grid)) grid <- GenGrid(domain)
+
+  n <- grid$n
+  nHT <- length(qHT)
+
+  # ---- Extract observation data ----
+  trueobshHT <- list()
+  loc_obsHT  <- list()
+  for (i in seq_len(nHT)) {
+    oinf <- oHT[[i]]
+    oelemdf <- getOelem(grid = grid, Oinf = oinf)
+    loc_obsHT[[i]] <- oelemdf$nelem
+    trueobshHT[[i]] <- oinf$data
+  }
+  trueobsh <- unlist(trueobshHT)
+  nobs <- length(trueobsh)
+
+  # ---- Build prior covariance C_kk from geostatistical model ----
+  # Use the same variogram model as random2d to compute covariance
+  require('gstat')
+  xy <- grid$grid
+
+  # Compute prior covariance matrix analytically from variogram model
+  # C_kk(i,j) = sill - variogram(|x_i - x_j|)
+  dist_mat <- as.matrix(dist(xy))
+  if (geo$geomod == "Exp") {
+    C_kk <- geo$var * exp(-dist_mat / geo$range)
+    diag(C_kk) <- geo$var + geo$nugget
+  } else if (geo$geomod == "Gau") {
+    C_kk <- geo$var * exp(-(dist_mat / geo$range)^2)
+    diag(C_kk) <- geo$var + geo$nugget
+  } else if (geo$geomod == "Sph") {
+    hr <- dist_mat / geo$range
+    C_kk <- geo$var * (1 - 1.5 * hr + 0.5 * hr^3)
+    C_kk[hr > 1] <- 0
+    diag(C_kk) <- geo$var + geo$nugget
+  } else {
+    C_kk <- geo$var * exp(-dist_mat / geo$range)
+    diag(C_kk) <- geo$var + geo$nugget
+  }
+
+  # ---- Initial parameter estimate ----
+  if (is.null(m0)) {
+    m <- rep(geo$me, n)  # log-T
+  } else {
+    m <- m0
+  }
+  T_current <- exp(m)
+
+  # ---- Iteration loop ----
+  niter <- 1
+  rmse <- 1e10
+  iterdf <- list()
+
+  while (niter <= itermax && rmse > rmsemin) {
+
+    # --- Forward simulation at current T ---
+    h_sim_vec <- samHT(grid = grid, TT = T_current,
+                       qHT = qHT, oHT = oHT, lrw = lrw)
+
+    # --- Misfit ---
+    residual <- trueobsh - h_sim_vec
+    rmse <- sqrt(mean(residual^2))
+    l2 <- rmse
+    l1 <- mean(abs(residual))
+
+    msg <- paste('niter =', niter,
+                 'rmse =', round(rmse, 6),
+                 'l2 =', round(l2, 6),
+                 'l1 =', round(l1, 6),
+                 'lambda_lm =', round(lambda_lm, 4))
+    print(msg)
+
+    # --- Compute Jacobian ---
+    J <- jacobian2D(grid = grid, TT = T_current,
+                    qHT = qHT, oHT = oHT, lrw = lrw)
+
+    if (ifcor) {
+      print("ifcor = TRUE: returning Jacobian and simulated heads without update.")
+      return(list(J = J, h_sim = h_sim_vec))
+    }
+
+    # --- Compute update (dual / observation-space formulation) ---
+    # dm = C_kk * J^T * (J * C_kk * J^T + R + lambda_lm * I)^{-1} * residual
+    Jt <- t(J)                                     # nelem x nobs
+    JCJt <- J %*% C_kk %*% Jt                      # nobs x nobs
+    S <- JCJt + (sigma2obs + lambda_lm) * diag(nobs)
+
+    beta <- solve(S, residual)                     # nobs
+    dm <- as.vector(C_kk %*% Jt %*% beta)          # nelem
+
+    # --- Update parameters ---
+    m <- m + dm
+    T_current <- exp(m)
+
+    # --- Store iteration results ---
+    iterdf[[niter]] <- list(
+      m       = m,
+      h_sim   = h_sim_vec,
+      rmse    = rmse,
+      l2      = l2,
+      l1      = l1
+    )
+
+    if (niter == 1) {
+      iterdf[[niter]]$J <- J
+      print("--- time for one iteration ---")
+      print(difftime(Sys.time(), startTime))
+    }
+
+    niter <- niter + 1
+    lambda_lm <- lambda_lm / decay_lm
   }
 
   print("--- total time ---")

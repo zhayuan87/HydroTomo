@@ -60,6 +60,8 @@ Fsteady2dsim <- function(domain=c(40,40,0,40,0,40),
 
   Tp <- if(length(TT)==1) rep(TT,n) else TT
   Sp <- rep(1,n) # useless in steady-state solution.
+  Tpm <- matrix(Tp, nx, ny)
+  Spm <- matrix(Sp, nx, ny)
   h <- rep(0,n)
   h0 <- matrix(0,nx,ny)
   Qp <- Qinf$Qp
@@ -72,7 +74,7 @@ Fsteady2dsim <- function(domain=c(40,40,0,40,0,40),
   Nyp = Qseq$Nyp
   # solve the equation
   y <- rep(0,n)
-  para =list(dx=dx,dy=dy,nx=nx,ny=ny,Tp=Tp,Sp=Sp,Qp=Qp,Nxp=Nxp,Nyp=Nyp)
+  para =list(dx=dx,dy=dy,nx=nx,ny=ny,Tpm=Tpm,Spm=Spm,Qp=Qp,Nxp=Nxp,Nyp=Nyp)
   s_steady <- steady.2D(y = y, parms=para,func = diffusion2D, dimens = c(nx,ny),lrw = lrw)$y
   #xy <- expand.grid(x=xmid, y = ymid)
   xy = grid$grid
@@ -93,17 +95,13 @@ Fsteady2dsim <- function(domain=c(40,40,0,40,0,40),
 #'   interface).
 #' @param h current head vector \code{[L]}, length \code{nx * ny}.
 #' @param par named list of parameters built inside \code{Fsteady2dsim()} or
-#'   \code{Ftransient2dsim()}: \code{dx, dy, nx, ny, Tp, Sp, Qp, Nxp, Nyp}.
+#'   \code{Ftransient2dsim()}: \code{dx, dy, nx, ny, Tpm, Spm, Qp, Nxp, Nyp}.
 #' @return A list containing the residual vector \eqn{\partial h / \partial t}
 #'   (length \code{n}).
 #' @export
 
 diffusion2D <- function(t, h, par)   {
   with(par,{
-    Tpm <- matrix(Tp,nx,ny) # impose at the interface.
-    Spm <- matrix(Sp,nx,ny)
-    #Dx <- (Tpm[-nx,] + Tpm[-1,]) * 0.5
-    #Dy <- (Tpm[,-ny] + Tpm[,-1]) * 0.5
     Dx <- (rbind(Tpm[1,],Tpm) + rbind(Tpm,Tpm[nx,])) * 0.5
     Dy <- (cbind(Tpm[,1],Tpm) + cbind(Tpm,Tpm[,ny])) * 0.5
     y    <- matrix(nr=nx,nc=ny,data=h)  # vector to 2-D matrix

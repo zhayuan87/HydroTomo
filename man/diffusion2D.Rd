@@ -13,7 +13,7 @@ interface).}
 \item{h}{current head vector \code{[L]}, length \code{nx * ny}.}
 
 \item{par}{named list of parameters built inside \code{Fsteady2dsim()} or
-\code{Ftransient2dsim()}: \code{dx, dy, nx, ny, Tp, Sp, Qp, Nxp, Nyp}.}
+\code{Ftransient2dsim()}: \code{dx, dy, nx, ny, Tpm, Spm, Qp, Nxp, Nyp}.}
 }
 \value{
 A list containing the residual vector \eqn{\partial h / \partial t}
