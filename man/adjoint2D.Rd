@@ -5,12 +5,6 @@
 \title{Solve the adjoint equation for a single observation point (2D steady-state)}
 \usage{
 adjoint2D(grid, TT, iobs, lrw = 160000)
-
-adjoint2D(grid, TT, iobs, lrw = 160000)
-
-adjoint2D(grid, TT, iobs, lrw = 160000)
-
-adjoint2D(grid, TT, iobs, lrw = 160000)
 }
 \arguments{
 \item{grid}{grid list from \code{GenGrid()}.}
@@ -23,47 +17,8 @@ adjoint2D(grid, TT, iobs, lrw = 160000)
 }
 \value{
 Numeric vector of adjoint variable \eqn{\lambda} (length \code{n}).
-
-Numeric vector of adjoint variable \eqn{\lambda} (length \code{n}).
-
-Numeric vector of adjoint variable \eqn{\lambda} (length \code{n}).
-
-Numeric vector of adjoint variable \eqn{\lambda} (length \code{n}).
 }
 \description{
-For the 2D steady-state groundwater flow equation
-\eqn{\nabla \cdot (T \nabla h) = Q}, the adjoint state \eqn{\lambda} for an
-observation at cell \code{iobs} satisfies:
-\deqn{\nabla \cdot (T \nabla \lambda) = \delta(\mathbf{x} - \mathbf{x}_{iobs})}
-with homogeneous (zero) boundary conditions.  This is the same PDE as the
-forward problem but with a unit source at the observation location instead
-of a pumping well.  The adjoint variable is used to compute the Jacobian
-(sensitivity) matrix via:
-\deqn{\frac{\partial h_{iobs}}{\partial (\ln T)_k} =
-      -T_k \, \nabla h|_k \cdot \nabla \lambda|_k \, \Delta x \, \Delta y}
-
-For the 2D steady-state groundwater flow equation
-\eqn{\nabla \cdot (T \nabla h) = Q}, the adjoint state \eqn{\lambda} for an
-observation at cell \code{iobs} satisfies:
-\deqn{\nabla \cdot (T \nabla \lambda) = \delta(\mathbf{x} - \mathbf{x}_{iobs})}
-with homogeneous (zero) boundary conditions.  This is the same PDE as the
-forward problem but with a unit source at the observation location instead
-of a pumping well.  The adjoint variable is used to compute the Jacobian
-(sensitivity) matrix via:
-\deqn{\frac{\partial h_{iobs}}{\partial (\ln T)_k} =
-      -T_k \, \nabla h|_k \cdot \nabla \lambda|_k \, \Delta x \, \Delta y}
-
-For the 2D steady-state groundwater flow equation
-\eqn{\nabla \cdot (T \nabla h) = Q}, the adjoint state \eqn{\lambda} for an
-observation at cell \code{iobs} satisfies:
-\deqn{\nabla \cdot (T \nabla \lambda) = \delta(\mathbf{x} - \mathbf{x}_{iobs})}
-with homogeneous (zero) boundary conditions.  This is the same PDE as the
-forward problem but with a unit source at the observation location instead
-of a pumping well.  The adjoint variable is used to compute the Jacobian
-(sensitivity) matrix via:
-\deqn{\frac{\partial h_{iobs}}{\partial (\ln T)_k} =
-      -T_k \, \nabla h|_k \cdot \nabla \lambda|_k \, \Delta x \, \Delta y}
-
 For the 2D steady-state groundwater flow equation
 \eqn{\nabla \cdot (T \nabla h) = Q}, the adjoint state \eqn{\lambda} for an
 observation at cell \code{iobs} satisfies:

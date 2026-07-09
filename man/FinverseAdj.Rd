@@ -17,55 +17,8 @@ FinverseAdj(
   decay_lm = 2,
   geo = list(me = 0, var = 1, geomod = "Exp", anis = c(90, 1), range = 30, nugget = 0),
   m0 = NULL,
-  ifcor = FALSE
-)
-
-FinverseAdj(
-  domain = c(40, 40, 0, 40, 0, 40),
-  grid = NULL,
-  qHT = list(data.frame(Qp = 10, x = 20.5, y = 20.5)),
-  itermax = 5,
-  rmsemin = 0,
-  oHT = list(data.frame(data = -1, x = 11, y = 11)),
-  lrw = 160000,
-  sigma2obs = 1e-04,
-  lambda_lm = 1,
-  decay_lm = 2,
-  geo = list(me = 0, var = 1, geomod = "Exp", anis = c(90, 1), range = 30, nugget = 0),
-  m0 = NULL,
-  ifcor = FALSE
-)
-
-FinverseAdj(
-  domain = c(40, 40, 0, 40, 0, 40),
-  grid = NULL,
-  qHT = list(data.frame(Qp = 10, x = 20.5, y = 20.5)),
-  itermax = 5,
-  rmsemin = 0,
-  oHT = list(data.frame(data = -1, x = 11, y = 11)),
-  lrw = 160000,
-  sigma2obs = 1e-04,
-  lambda_lm = 1,
-  decay_lm = 2,
-  geo = list(me = 0, var = 1, geomod = "Exp", anis = c(90, 1), range = 30, nugget = 0),
-  m0 = NULL,
-  ifcor = FALSE
-)
-
-FinverseAdj(
-  domain = c(40, 40, 0, 40, 0, 40),
-  grid = NULL,
-  qHT = list(data.frame(Qp = 10, x = 20.5, y = 20.5)),
-  itermax = 5,
-  rmsemin = 0,
-  oHT = list(data.frame(data = -1, x = 11, y = 11)),
-  lrw = 160000,
-  sigma2obs = 1e-04,
-  lambda_lm = 1,
-  decay_lm = 2,
-  geo = list(me = 0, var = 1, geomod = "Exp", anis = c(90, 1), range = 30, nugget = 0),
-  m0 = NULL,
-  ifcor = FALSE
+  ifcor = FALSE,
+  ifvarTh = FALSE
 )
 }
 \arguments{
@@ -99,47 +52,29 @@ by \code{decay_lm} each iteration.}
 
 \item{ifcor}{logical; if \code{TRUE}, returns the Jacobian matrix and
 forward response after the first iteration without performing the update.}
+
+\item{ifvarTh}{logical; if \code{TRUE}, computes and stores the predicted
+head variance \code{varobsh} and the conditional (posterior) variance of
+log-T \code{varT} at each iteration.  \code{varobsh} is
+\code{diag(J \%*\% C_kk \%*\% t(J))}; \code{varT} follows the SLE
+conditional-covariance update (Yeh & Liu, 2000) and is analogous to a
+kriging variance.  Default \code{FALSE} because the covariance matrix
+operation can be expensive for large grids.}
 }
 \value{
 A list of per-iteration results, each a list with
-\code{m} (log-T estimate), \code{h_sim} (simulated heads),
-\code{rmse}, \code{l2}, \code{l1}, and \code{J} (Jacobian, first iteration
-only).  When \code{ifcor = TRUE}, returns list(J = J, h_sim = h_sim).
-
-A list of per-iteration results, each a list with
-\code{m} (log-T estimate), \code{h_sim} (simulated heads),
-\code{rmse}, \code{l2}, \code{l1}, and \code{J} (Jacobian, first iteration
-only).  When \code{ifcor = TRUE}, returns list(J = J, h_sim = h_sim).
-
-A list of per-iteration results, each a list with
-\code{m} (log-T estimate), \code{h_sim} (simulated heads),
-\code{rmse}, \code{l2}, \code{l1}, and \code{J} (Jacobian, first iteration
-only).  When \code{ifcor = TRUE}, returns list(J = J, h_sim = h_sim).
-
-A list of per-iteration results, each a list with
-\code{m} (log-T estimate), \code{h_sim} (simulated heads),
-\code{rmse}, \code{l2}, \code{l1}, and \code{J} (Jacobian, first iteration
-only).  When \code{ifcor = TRUE}, returns list(J = J, h_sim = h_sim).
+\code{meanT} (log-T estimate, same as \code{m}), \code{varT}
+(conditional variance of log-T, only when \code{ifvarTh = TRUE}),
+\code{meanobsh} (simulated heads), \code{varobsh} (predicted head variance,
+only when \code{ifvarTh = TRUE}),
+\code{m}, \code{h_sim}, \code{rmse}, \code{l2}, \code{l1}, and
+\code{J} (Jacobian, first iteration only).  The variable names
+\code{meanT}, \code{varT}, \code{meanobsh}, and \code{varobsh} are kept
+compatible with \code{\link{Finverse3}} so that \code{\link{inversePlot}}
+can be used directly.  When \code{ifcor = TRUE}, returns
+\code{list(J = J, h_sim = h_sim)}.
 }
 \description{
-Performs deterministic Bayesian inversion to estimate the 2D
-log-transmissivity field \eqn{\ln T(\mathbf{x})} from hydraulic tomography
-(HT) data using the \strong{adjoint-state method} to compute the Jacobian
-(sensitivity) matrix analytically, instead of using ensemble statistics
-as in the ESMDA-based \code{\link{Finverse3}}.
-
-Performs deterministic Bayesian inversion to estimate the 2D
-log-transmissivity field \eqn{\ln T(\mathbf{x})} from hydraulic tomography
-(HT) data using the \strong{adjoint-state method} to compute the Jacobian
-(sensitivity) matrix analytically, instead of using ensemble statistics
-as in the ESMDA-based \code{\link{Finverse3}}.
-
-Performs deterministic Bayesian inversion to estimate the 2D
-log-transmissivity field \eqn{\ln T(\mathbf{x})} from hydraulic tomography
-(HT) data using the \strong{adjoint-state method} to compute the Jacobian
-(sensitivity) matrix analytically, instead of using ensemble statistics
-as in the ESMDA-based \code{\link{Finverse3}}.
-
 Performs deterministic Bayesian inversion to estimate the 2D
 log-transmissivity field \eqn{\ln T(\mathbf{x})} from hydraulic tomography
 (HT) data using the \strong{adjoint-state method} to compute the Jacobian
@@ -159,98 +94,8 @@ covariance derived from the geostatistical model.
 
 A Levenberg-Marquardt damping parameter \code{lambda_lm} is added to the
 diagonal of the Hessian approximation for stability.
-
-The update follows the quasi-linear Bayesian formulation:
-\deqn{\Delta \mathbf{m} = (\mathbf{J}^\top \mathbf{R}^{-1} \mathbf{J} +
-      \mathbf{C}_{kk}^{-1})^{-1} \,
-      \mathbf{J}^\top \mathbf{R}^{-1} \,
-      (\mathbf{d}_{\text{obs}} - \mathbf{g}(\mathbf{m}))}
-where \eqn{\mathbf{J}} is the Jacobian from \code{\link{jacobian2D}},
-\eqn{\mathbf{R}} is the observation error covariance (assumed diagonal with
-variance \code{sigma2obs}), and \eqn{\mathbf{C}_{kk}} is the prior parameter
-covariance derived from the geostatistical model.
-
-A Levenberg-Marquardt damping parameter \code{lambda_lm} is added to the
-diagonal of the Hessian approximation for stability.
-
-The update follows the quasi-linear Bayesian formulation:
-\deqn{\Delta \mathbf{m} = (\mathbf{J}^\top \mathbf{R}^{-1} \mathbf{J} +
-      \mathbf{C}_{kk}^{-1})^{-1} \,
-      \mathbf{J}^\top \mathbf{R}^{-1} \,
-      (\mathbf{d}_{\text{obs}} - \mathbf{g}(\mathbf{m}))}
-where \eqn{\mathbf{J}} is the Jacobian from \code{\link{jacobian2D}},
-\eqn{\mathbf{R}} is the observation error covariance (assumed diagonal with
-variance \code{sigma2obs}), and \eqn{\mathbf{C}_{kk}} is the prior parameter
-covariance derived from the geostatistical model.
-
-A Levenberg-Marquardt damping parameter \code{lambda_lm} is added to the
-diagonal of the Hessian approximation for stability.
-
-The update follows the quasi-linear Bayesian formulation:
-\deqn{\Delta \mathbf{m} = (\mathbf{J}^\top \mathbf{R}^{-1} \mathbf{J} +
-      \mathbf{C}_{kk}^{-1})^{-1} \,
-      \mathbf{J}^\top \mathbf{R}^{-1} \,
-      (\mathbf{d}_{\text{obs}} - \mathbf{g}(\mathbf{m}))}
-where \eqn{\mathbf{J}} is the Jacobian from \code{\link{jacobian2D}},
-\eqn{\mathbf{R}} is the observation error covariance (assumed diagonal with
-variance \code{sigma2obs}), and \eqn{\mathbf{C}_{kk}} is the prior parameter
-covariance derived from the geostatistical model.
-
-A Levenberg-Marquardt damping parameter \code{lambda_lm} is added to the
-diagonal of the Hessian approximation for stability.
 }
 \examples{
-\dontrun{
-set.seed(100)
-trueK <- random2d(nsim=1)
-TT <- trueK[,-c(1,2)]
-domain <- c(40,40,0,40,0,40)
-grid <- GenGrid(domain)
-Qinf1 <- data.frame(Qp=10, x=20.5, y=20.5)
-qHT <- list(test1 = Qinf1)
-trueh <- Fsteady2dsim(TT=TT, Qinf=Qinf1, domain=domain)
-locx <- c(15,18,22,25,30)
-locy <- c(15,18,22,25,30)
-loc <- expand.grid(x=locx, y=locy)
-Oinf1 <- data.frame(data=NA, x=loc$x, y=loc$y)
-Oinf1 <- samData(grid=grid, Oinf=Oinf1, h=trueh$solution)
-oHT <- list(test1 = Oinf1)
-result <- FinverseAdj(grid=grid, qHT=qHT, oHT=oHT, itermax=3)
-}
-\dontrun{
-set.seed(100)
-trueK <- random2d(nsim=1)
-TT <- trueK[,-c(1,2)]
-domain <- c(40,40,0,40,0,40)
-grid <- GenGrid(domain)
-Qinf1 <- data.frame(Qp=10, x=20.5, y=20.5)
-qHT <- list(test1 = Qinf1)
-trueh <- Fsteady2dsim(TT=TT, Qinf=Qinf1, domain=domain)
-locx <- c(15,18,22,25,30)
-locy <- c(15,18,22,25,30)
-loc <- expand.grid(x=locx, y=locy)
-Oinf1 <- data.frame(data=NA, x=loc$x, y=loc$y)
-Oinf1 <- samData(grid=grid, Oinf=Oinf1, h=trueh$solution)
-oHT <- list(test1 = Oinf1)
-result <- FinverseAdj(grid=grid, qHT=qHT, oHT=oHT, itermax=3)
-}
-\dontrun{
-set.seed(100)
-trueK <- random2d(nsim=1)
-TT <- trueK[,-c(1,2)]
-domain <- c(40,40,0,40,0,40)
-grid <- GenGrid(domain)
-Qinf1 <- data.frame(Qp=10, x=20.5, y=20.5)
-qHT <- list(test1 = Qinf1)
-trueh <- Fsteady2dsim(TT=TT, Qinf=Qinf1, domain=domain)
-locx <- c(15,18,22,25,30)
-locy <- c(15,18,22,25,30)
-loc <- expand.grid(x=locx, y=locy)
-Oinf1 <- data.frame(data=NA, x=loc$x, y=loc$y)
-Oinf1 <- samData(grid=grid, Oinf=Oinf1, h=trueh$solution)
-oHT <- list(test1 = Oinf1)
-result <- FinverseAdj(grid=grid, qHT=qHT, oHT=oHT, itermax=3)
-}
 \dontrun{
 set.seed(100)
 trueK <- random2d(nsim=1)

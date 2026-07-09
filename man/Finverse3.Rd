@@ -17,7 +17,8 @@ Finverse3(
   oHT = list(data.frame(data = -1, x = 11, y = 11)),
   lrw = 160000,
   ncore = 10,
-  geo = list(me = 0, var = 1, geomod = "Exp", anis = c(90, 1), range = 30, nugget = 0)
+  geo = list(me = 0, var = 1, geomod = "Exp", anis = c(90, 1), range = 30, nugget = 0),
+  ifcor = FALSE
 )
 }
 \arguments{

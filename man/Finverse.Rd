@@ -16,7 +16,8 @@ Finverse(
   decay = 1.05,
   oHT = list(data.frame(data = -1, x = 11, y = 11)),
   lrw = 160000,
-  geo = list(me = 0, var = 1, geomod = "Exp", anis = c(90, 1), range = 30, nugget = 0)
+  geo = list(me = 0, var = 1, geomod = "Exp", anis = c(90, 1), range = 30, nugget = 0),
+  ifcor = FALSE
 )
 }
 \arguments{
@@ -60,12 +61,17 @@ Default 160000; increase for larger grids.}
 \code{geomod} is the variogram model type (e.g. \code{"Exp"});
 \code{anis} is \code{c(azimuth_deg, ratio)}; \code{range} is the
 correlation range \code{[L]}; \code{nugget} is the nugget variance.}
+
+\item{ifcor}{logical; if \code{TRUE}, returns the ensemble results after
+the first iteration without performing the update. Useful for checking#'   forward simulations before running the full inversion.}
 }
 \value{
 A list of per-iteration results, each element a list with
 \code{meanT} (mean ln(T) vector), \code{varT} (variance of ln(T)),
 \code{meanobsh} (mean simulated head), \code{varobsh} (variance of
-simulated head).
+simulated head).  When \code{ifcor = TRUE}, returns list with
+\code{obsh} (simulated heads), \code{Tnew} (ensemble), and
+\code{meanobsh}.
 }
 \description{
 Performs ensemble-smoother-based Bayesian inversion to estimate the 2D

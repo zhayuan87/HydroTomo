@@ -178,20 +178,31 @@ inversePlot <- function(niterm=1,grid,iterdf,oHT,trueK=NULL,
   # }
 
   trueh <- oHTdf$data # the observation data in a vector.
-  df <- data.frame(x=grid$grid$x,y=grid$grid$y,v=iterdf[[niterm]]$meanT,var=iterdf[[niterm]]$varT)
   library(ggplot2)
-  p1<- ggplot(df) +
+  # build df first, before constructing p1
+  if ("varT" %in% names(iterdf[[niterm]]) && !is.null(iterdf[[niterm]]$varT)) {
+    df <- data.frame(x=grid$grid$x,y=grid$grid$y,v=iterdf[[niterm]]$meanT,var=iterdf[[niterm]]$varT)
+    p2 <- ggplot(df) +
+      aes(x = x, y = y, fill = var) +
+      geom_tile()+
+      scale_fill_viridis_c(option = "viridis", direction = 1)+
+      labs(title = p2title, x = p2xlab, y = p2ylab, fill = p2z)
+  } else {
+    df <- data.frame(x=grid$grid$x,y=grid$grid$y,v=iterdf[[niterm]]$meanT)
+    p2 <- NULL
+  }
+  p1 <- ggplot(df) +
     aes(x = x, y = y, fill = v) +
     geom_tile()+
     scale_fill_viridis_c(option = "viridis", direction = 1)+
     labs(title = p1title, x = p1xlab, y = p1ylab, fill = p1z)
-  p2 <- ggplot(df) +
-    aes(x = x, y = y, fill = var) +
-    geom_tile()+
-    scale_fill_viridis_c(option = "viridis", direction = 1)+
-    labs(title = p2title, x = p2xlab, y = p2ylab, fill = p2z)
   # change it to drawdown not head.
-  dfh <- data.frame(trueh=-trueh,simh=-iterdf[[niterm]]$meanobsh,varh=iterdf[[niterm]]$varobsh,ntest=oHTdf$id)
+  has_varobsh <- "varobsh" %in% names(iterdf[[niterm]]) && !is.null(iterdf[[niterm]]$varobsh)
+  if (has_varobsh) {
+    dfh <- data.frame(trueh=-trueh,simh=-iterdf[[niterm]]$meanobsh,varh=iterdf[[niterm]]$varobsh,ntest=oHTdf$id)
+  } else {
+    dfh <- data.frame(trueh=-trueh,simh=-iterdf[[niterm]]$meanobsh,ntest=oHTdf$id)
+  }
   #https://www.roelpeters.be/how-to-add-a-regression-equation-and-r-squared-in-ggplot2/
   #https://rpkgs.datanovia.com/ggpubr/reference/stat_regline_equation.html
   require(ggpubr)
@@ -206,13 +217,14 @@ inversePlot <- function(niterm=1,grid,iterdf,oHT,trueK=NULL,
   tb = tibble(round(statData(dfh),3))
   df = tibble(x=x,y=y,tb=list(tb))
   p3 <- ggplot(dfh) +
-    geom_errorbar(aes(x = trueh,ymin=simh-varh^0.5,ymax=simh+varh^0.5),width=0.02,color="gray")+
     geom_point(size=4,aes(x = trueh, y = simh,colour=ntest))+
     geom_smooth(method = "lm", aes(x = trueh, y = simh),se=FALSE) +
     stat_regline_equation(aes(x = trueh, y = simh),label.x = xn + 0.01*(xm - xn),label.y = ym- 0.01 *(ym - yn)) +
-    #stat_cor( aes(x = trueh, y = simh),label.y = -1) +
     geom_table(data=df,aes(x=x,y=y,label=tb)) +
     labs(title = p3title, x = p3xlab, y = p3ylab)
+  if (has_varobsh) {
+    p3 <- p3 + geom_errorbar(aes(x = trueh,ymin=simh-varh^0.5,ymax=simh+varh^0.5),width=0.02,color="gray")
+  }
 
   p1
   p2
@@ -237,10 +249,14 @@ inversePlot <- function(niterm=1,grid,iterdf,oHT,trueK=NULL,
       geom_table(data=df,aes(x=x,y=y,label=tb)) +
       labs(title = p4title, x = p4xlab, y = p4ylab)
   }
-  if(!is.null(trueK))
+  if(!is.null(trueK) && !is.null(p2))
     return(list(lnk=p1,varlnk=p2,lnkscatter=p4,headscatter=p3))
-  else
+  else if(!is.null(trueK))
+    return(list(lnk=p1,lnkscatter=p4,headscatter=p3))
+  else if(!is.null(p2))
     return(list(lnk=p1,varlnk=p2,headscatter=p3))
+  else
+    return(list(lnk=p1,headscatter=p3))
 }
 
 # ---- 3D Visualization --------------------------------------------------------

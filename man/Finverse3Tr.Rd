@@ -19,7 +19,8 @@ Finverse3Tr(
   times = seq(0, 100, by = 10),
   lrw = 1600000,
   ncore = 10,
-  geo = list(me = 0, var = 1, geomod = "Exp", anis = c(90, 1), range = 30, nugget = 0)
+  geo = list(me = 0, var = 1, geomod = "Exp", anis = c(90, 1), range = 30, nugget = 0),
+  ifcor = FALSE
 )
 }
 \arguments{

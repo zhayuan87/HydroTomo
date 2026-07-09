@@ -18,7 +18,8 @@ Finverse3DScreen(
   lrw = 2e+07,
   ncore = 4,
   geo = list(me = 0, var = 1, geomod = "Exp", range = 10, nugget = 0, anis = c(0, 0, 0,
-    1, 1))
+    1, 1)),
+  ifcor = FALSE
 )
 }
 \arguments{
@@ -51,9 +52,13 @@ if \code{NULL}.}
 \item{ncore}{number of parallel cores (default 4).}
 
 \item{geo}{prior geostatistical parameters (list).}
+
+\item{ifcor}{logical; if \code{TRUE}, returns the ensemble results after
+the first iteration without performing the update.}
 }
 \value{
-list of per-iteration results.
+list of per-iteration results.  When \code{ifcor = TRUE}, returns
+list with \code{obsh}, \code{Tnew}, and \code{meanobsh}.
 }
 \description{
 Like \code{\link{Finverse3D}} but for wells with vertical screens

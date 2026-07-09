@@ -11,30 +11,6 @@ jacobian2D(
   oHT = list(data.frame(data = -1, x = 11, y = 11)),
   lrw = 160000
 )
-
-jacobian2D(
-  grid,
-  TT,
-  qHT = list(data.frame(Qp = 10, x = 20.5, y = 20.5)),
-  oHT = list(data.frame(data = -1, x = 11, y = 11)),
-  lrw = 160000
-)
-
-jacobian2D(
-  grid,
-  TT,
-  qHT = list(data.frame(Qp = 10, x = 20.5, y = 20.5)),
-  oHT = list(data.frame(data = -1, x = 11, y = 11)),
-  lrw = 160000
-)
-
-jacobian2D(
-  grid,
-  TT,
-  qHT = list(data.frame(Qp = 10, x = 20.5, y = 20.5)),
-  oHT = list(data.frame(data = -1, x = 11, y = 11)),
-  lrw = 160000
-)
 }
 \arguments{
 \item{grid}{grid list from \code{GenGrid()}.}
@@ -49,26 +25,8 @@ jacobian2D(
 }
 \value{
 A matrix of dimension \code{nobs × nelem}.
-
-A matrix of dimension \code{nobs × nelem}.
-
-A matrix of dimension \code{nobs × nelem}.
-
-A matrix of dimension \code{nobs × nelem}.
 }
 \description{
-For 2D steady-state hydraulic tomography, computes the Jacobian matrix
-\eqn{\mathbf{J} = \partial \mathbf{h} / \partial (\ln \mathbf{T})}
-(dimension \code{nobs × nelem}) using the adjoint-state method.
-
-For 2D steady-state hydraulic tomography, computes the Jacobian matrix
-\eqn{\mathbf{J} = \partial \mathbf{h} / \partial (\ln \mathbf{T})}
-(dimension \code{nobs × nelem}) using the adjoint-state method.
-
-For 2D steady-state hydraulic tomography, computes the Jacobian matrix
-\eqn{\mathbf{J} = \partial \mathbf{h} / \partial (\ln \mathbf{T})}
-(dimension \code{nobs × nelem}) using the adjoint-state method.
-
 For 2D steady-state hydraulic tomography, computes the Jacobian matrix
 \eqn{\mathbf{J} = \partial \mathbf{h} / \partial (\ln \mathbf{T})}
 (dimension \code{nobs × nelem}) using the adjoint-state method.
@@ -81,39 +39,15 @@ For each pumping test \eqn{j} and each observation \eqn{i}:
 \item Compute sensitivity:
 \eqn{J_{ik} = -T_k \, (\nabla h|_k \cdot \nabla \lambda_i|_k) \, \Delta x \, \Delta y}
 }
-
-For each pumping test \eqn{j} and each observation \eqn{i}:
-\enumerate{
-\item Solve the forward problem to obtain head field \eqn{h}
-\item Solve the adjoint problem to obtain \eqn{\lambda_i}
-\item Compute sensitivity:
-\eqn{J_{ik} = -T_k \, (\nabla h|_k \cdot \nabla \lambda_i|_k) \, \Delta x \, \Delta y}
-}
-
-For each pumping test \eqn{j} and each observation \eqn{i}:
-\enumerate{
-\item Solve the forward problem to obtain head field \eqn{h}
-\item Solve the adjoint problem to obtain \eqn{\lambda_i}
-\item Compute sensitivity:
-\eqn{J_{ik} = -T_k \, (\nabla h|_k \cdot \nabla \lambda_i|_k) \, \Delta x \, \Delta y}
-}
-
-For each pumping test \eqn{j} and each observation \eqn{i}:
-\enumerate{
-\item Solve the forward problem to obtain head field \eqn{h}
-\item Solve the adjoint problem to obtain \eqn{\lambda_i}
-\item Compute sensitivity:
-\eqn{J_{ik} = -T_k \, (\nabla h|_k \cdot \nabla \lambda_i|_k) \, \Delta x \, \Delta y}
-}
 }
 \examples{
-# ---- 1. Setup grid and transmissivity field ----
+# Setup grid and transmissivity field
 domain <- c(20, 20, 0, 20, 0, 20)
 grid   <- GenGrid(domain)
 set.seed(123)
 TT <- random2d(grid = grid, nsim = 1)$Tp
 
-# ---- 2. Define pumping tests and observations ----
+# Define pumping tests and observations
 qHT <- list(
   data.frame(Qp = 10, x = 10.5, y = 10.5),
   data.frame(Qp = 10, x = 15.5, y = 15.5)
@@ -123,85 +57,10 @@ oHT <- list(
   data.frame(data = -1, x = 12.5, y = 12.5)
 )
 
-# ---- 3. Compute Jacobian ----
+# Compute Jacobian
 J <- jacobian2D(grid = grid, TT = TT, qHT = qHT, oHT = oHT)
 
-# ---- 4. Inspect results ----
-# Jacobian dimensions: nobs × nelem
-dim(J)
-# Sensitivity map for the first observation (row 1)
-image(matrix(J[1, ], grid$nx, grid$ny),
-      main = "Sensitivity: obs 1")
-# ---- 1. Setup grid and transmissivity field ----
-domain <- c(20, 20, 0, 20, 0, 20)
-grid   <- GenGrid(domain)
-set.seed(123)
-TT <- random2d(grid = grid, nsim = 1)$Tp
-
-# ---- 2. Define pumping tests and observations ----
-qHT <- list(
-  data.frame(Qp = 10, x = 10.5, y = 10.5),
-  data.frame(Qp = 10, x = 15.5, y = 15.5)
-)
-oHT <- list(
-  data.frame(data = -1, x = 5.5, y = 5.5),
-  data.frame(data = -1, x = 12.5, y = 12.5)
-)
-
-# ---- 3. Compute Jacobian ----
-J <- jacobian2D(grid = grid, TT = TT, qHT = qHT, oHT = oHT)
-
-# ---- 4. Inspect results ----
-# Jacobian dimensions: nobs × nelem
-dim(J)
-# Sensitivity map for the first observation (row 1)
-image(matrix(J[1, ], grid$nx, grid$ny),
-      main = "Sensitivity: obs 1")
-# ---- 1. Setup grid and transmissivity field ----
-domain <- c(20, 20, 0, 20, 0, 20)
-grid   <- GenGrid(domain)
-set.seed(123)
-TT <- random2d(grid = grid, nsim = 1)$Tp
-
-# ---- 2. Define pumping tests and observations ----
-qHT <- list(
-  data.frame(Qp = 10, x = 10.5, y = 10.5),
-  data.frame(Qp = 10, x = 15.5, y = 15.5)
-)
-oHT <- list(
-  data.frame(data = -1, x = 5.5, y = 5.5),
-  data.frame(data = -1, x = 12.5, y = 12.5)
-)
-
-# ---- 3. Compute Jacobian ----
-J <- jacobian2D(grid = grid, TT = TT, qHT = qHT, oHT = oHT)
-
-# ---- 4. Inspect results ----
-# Jacobian dimensions: nobs × nelem
-dim(J)
-# Sensitivity map for the first observation (row 1)
-image(matrix(J[1, ], grid$nx, grid$ny),
-      main = "Sensitivity: obs 1")
-# ---- 1. Setup grid and transmissivity field ----
-domain <- c(20, 20, 0, 20, 0, 20)
-grid   <- GenGrid(domain)
-set.seed(123)
-TT <- random2d(grid = grid, nsim = 1)$Tp
-
-# ---- 2. Define pumping tests and observations ----
-qHT <- list(
-  data.frame(Qp = 10, x = 10.5, y = 10.5),
-  data.frame(Qp = 10, x = 15.5, y = 15.5)
-)
-oHT <- list(
-  data.frame(data = -1, x = 5.5, y = 5.5),
-  data.frame(data = -1, x = 12.5, y = 12.5)
-)
-
-# ---- 3. Compute Jacobian ----
-J <- jacobian2D(grid = grid, TT = TT, qHT = qHT, oHT = oHT)
-
-# ---- 4. Inspect results ----
+# Inspect results
 # Jacobian dimensions: nobs × nelem
 dim(J)
 # Sensitivity map for the first observation (row 1)

@@ -20,7 +20,8 @@ Finverse3DTr(
   lrw = 2e+07,
   ncore = 4,
   geo = list(me = 0, var = 1, geomod = "Exp", range = 10, nugget = 0, anis = c(0, 0, 0,
-    1, 1))
+    1, 1)),
+  ifcor = FALSE
 )
 }
 \arguments{
@@ -63,11 +64,17 @@ cover all observation times in \code{oHT}.}
 \item{geo}{prior geostatistical parameters — same list structure as
 \code{random3d()}: \code{list(me, var, geomod, range, nugget, anis)}.
 Note \code{anis} is a 5-element vector for 3D.}
+
+\item{ifcor}{logical; if \code{TRUE}, returns the ensemble results after
+the first iteration without performing the update. Useful for checking
+forward simulations before running the full inversion.}
 }
 \value{
 list of per-iteration results, each a list with
 \code{meanT} (mean ln K vector), \code{varT} (variance of ln K),
-\code{meanobsh}, \code{varobsh}.
+\code{meanobsh}, \code{varobsh}.  When \code{ifcor = TRUE}, returns
+list with \code{obsh} (simulated heads), \code{Tnew} (ensemble), and
+\code{meanobsh}.
 }
 \description{
 Transient extension of \code{Finverse3D}.  Replaces the steady-state forward
