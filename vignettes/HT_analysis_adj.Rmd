@@ -1,0 +1,1093 @@
+---
+title: "HydroTomo - Hydraulic Tomography Analysis (Adjoint Method)"
+author: ''
+date: "`r Sys.Date()`"
+output:
+  word_document:
+    toc: true
+  html_document:
+    toc: true
+    toc_float: true
+    code_folding: show
+    fig_width: 10
+    fig_height: 7
+subtitle: "Steady-State 3D Adjoint-Based Inversion with Well Screens"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE,
+                      fig.width = 10, fig.height = 7)
+```
+
+# 1. Load Packages
+
+```{r packages}
+library(HydroTomo)
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(gridExtra)
+```
+
+# 2. Read and Inspect CSV Data
+
+```{r read_csv}
+# File paths
+data_dir <- file.path("D:", "BaiduSyncdisk", "研究生", "董海洲",
+                       "水力层析抽水试验数据 (7.24)", "水力层析抽水试验数据")
+
+# Read all CSVs
+wells <- read.csv(file.path(data_dir, "wells_xyz.csv"),
+                  stringsAsFactors = FALSE)
+drawdown <- read.csv(file.path(data_dir, "Final_Drawdown_Summary.csv"),
+                     stringsAsFactors = FALSE, fileEncoding = "UTF-8")
+pump_summary <- read.csv(file.path(data_dir, "pumping_test_summary.csv"),
+                         stringsAsFactors = FALSE, fileEncoding = "UTF-8")
+pump_rate <- read.csv(file.path(data_dir, "pumping_rate_info.csv"),
+                      stringsAsFactors = FALSE, fileEncoding = "UTF-8")
+
+# Inspect
+cat("=== wells_xyz ===\n")
+print(wells)
+
+cat("\n=== pumping_rate_info ===\n")
+print(pump_rate)
+
+cat("\n=== pumping_test_summary ===\n")
+print(pump_summary)
+
+cat("\n=== Final_Drawdown_Summary (unique tests) ===\n")
+print(unique(drawdown[[1]]))
+```
+
+# 3. Coordinate Translation and Well Classification
+
+HydroTomo convention: z downward positive (depth).  
+Exclude distant wells K1-K4, focus on SY1-SY5 cluster for observation.
+
+```{r coord_translate}
+# ---- Well classification ----
+wells$type <- ifelse(grepl("^SY", wells$Well), "SY (core)", "K (distant)")
+cat("Well types:\n")
+print(table(wells$Well, wells$type))
+
+# ---- Compute offsets from SY wells only ----
+sy_wells <- wells[wells$type == "SY (core)", ]
+x0 <- min(sy_wells$X)
+y0 <- min(sy_wells$Y)
+cat(sprintf("\nOrigin offset (SY min): X0 = %.2f, Y0 = %.2f\n", x0, y0))
+
+# ---- Translate wells_xyz ----
+wells$x_local <- wells$X - x0
+wells$y_local <- wells$Y - y0
+# z downward positive: take absolute values of negative elevations
+wells$z_top    <- abs(wells$Z_top)
+wells$z_bottom <- abs(wells$Z_bot)
+
+# SY wells summary
+cat("\n=== SY well coordinates (translated, z downward positive) ===\n")
+sy_wells_t <- wells[wells$type == "SY (core)",
+                     c("Well", "Layer", "x_local", "y_local", "z_top", "z_bottom")]
+knitr::kable(sy_wells_t, digits = 2,
+             caption = "SY1-SY5 translated coordinates")
+
+# Spatial extent of SY wells
+cat(sprintf("\nSY wells XY range: x [%.2f, %.2f], y [%.2f, %.2f]\n",
+            min(sy_wells$x_local), max(sy_wells$x_local),
+            min(sy_wells$y_local), max(sy_wells$y_local)))
+cat(sprintf("SY wells Z range: [%.2f, %.2f]\n",
+            min(sy_wells$z_top), max(sy_wells$z_bottom)))
+
+# ---- Translate drawdown data ----
+drawdown$x_local <- drawdown$X坐标 - x0
+drawdown$y_local <- drawdown$Y坐标 - y0
+
+# Parse observation well name and layer
+drawdown$obs_well <- gsub("(一层|二层|三层)$", "", drawdown$观测井)
+drawdown$obs_layer <- gsub(".*(一层|二层|三层)$", "\\1", drawdown$观测井)
+drawdown$layer_num <- ifelse(drawdown$obs_layer == "一层", 1,
+                      ifelse(drawdown$obs_layer == "二层", 2, 3))
+drawdown$obs_type <- ifelse(grepl("^SY", drawdown$obs_well), "SY (core)", "K (distant)")
+
+cat("\nObservations by well type:\n")
+print(table(drawdown$obs_well, drawdown$obs_type))
+```
+
+# 4. Merge Pumping Rate Information
+
+```{r merge_pump_rate}
+# Merge pump rate into pump_summary
+pump_summary <- merge(pump_summary, pump_rate,
+                      by.x = "试验名称", by.y = "抽水名",
+                      all.x = TRUE)
+cat("Pumping test summary with rates:\n")
+knitr::kable(pump_summary, digits = 3,
+             caption = "Pumping tests with flow rates")
+```
+
+# 5. Select 2 Pumping Tests
+
+Select **SY1 Layer1** and **SY2 Layer1** for HT analysis.
+
+```{r select_tests}
+selected_tests <- c("SY1一层", "SY2一层")
+cat("Selected pumping tests:", selected_tests, "\n\n")
+
+# Filter data
+dd_sel <- drawdown[drawdown$试验名称 %in% selected_tests, ]
+pump_sel <- pump_summary[pump_summary$试验名称 %in% selected_tests, ]
+
+# Exclude K1-K4 observations: keep only SY observation wells
+dd_sel_sy <- dd_sel[dd_sel$obs_type == "SY (core)", ]
+cat(sprintf("Total observations: %d -> SY only: %d\n",
+            nrow(dd_sel), nrow(dd_sel_sy)))
+
+cat("\nSelected pump tests:\n")
+knitr::kable(pump_sel[, c("试验名称", "流量_m3h", "流量_m3min",
+                           "持续时间_min", "持续时间_h")],
+             digits = 3)
+```
+
+# 6. Design Grid with Proper Resolution
+
+Requirements:
+- SY1-SY5 wells must be in **different** grid cells
+- At least several grid cells as external boundary buffer
+- Vertical grid must accurately resolve screen intervals (~7.5m each)
+- Minimum well spacing: ~2m (e.g., SY3-SY5 in Y)
+
+Let's compute precisely.
+
+```{r design_grid}
+# ---- Analyze well spacing ----
+sy_xy <- unique(wells[wells$type == "SY (core)", c("Well", "x_local", "y_local")])
+cat("SY well XY positions:\n")
+knitr::kable(sy_xy, digits = 2)
+
+# Compute pairwise distances
+for (i in 1:(nrow(sy_xy)-1)) {
+  for (j in (i+1):nrow(sy_xy)) {
+    d <- sqrt((sy_xy$x_local[i] - sy_xy$x_local[j])^2 +
+              (sy_xy$y_local[i] - sy_xy$y_local[j])^2)
+    if (d < 10) {
+      cat(sprintf("  %s - %s: %.2f m\n", sy_xy$Well[i], sy_xy$Well[j], d))
+    }
+  }
+}
+
+# ---- Design grid ----
+# SY well XY extent (translated): x ~ [0, 6.8], y ~ [0, 6.6]
+# Minimum well spacing: ~2.6 m (SY2-SY5)
+#
+# Strategy (coarser grid to reduce computation):
+#   dx = 1.5 m -> minimum well pair separated by ~2 cells ✓
+#   dy = 1.5 m -> minimum well pair separated by ~2 cells ✓
+#   Boundary: ~8m (5-6 cells) on each side
+#   Total: x: 0-6.8 + 16 margin -> ~23 m (15 cells, dx=1.5)
+#          y: 0-6.6 + 16 margin -> ~23 m (15 cells, dy=1.5)
+#
+# Vertical:
+#   Screen intervals: Layer1 [5.6, 13.1], Layer2 [16.6, 24.1], Layer3 [27.6, 35.1]
+#   Inter-layer gap: ~3.5m
+#   dz = 3.0 m -> each screen spans 2-3 cells, layers separated by ~1 cell ✓
+#   Total z: 0 to 40 (14 cells, dz≈2.86m) -> round to dz=3.0, z=[0, 42] (14 cells)
+
+dx_use <- 1.5
+dy_use <- 1.5
+dz_use <- 3.0
+
+# XY domain with moderate boundary
+xy_margin <- 8  # ~5 cells boundary on each side
+x1 <- floor(min(sy_xy$x_local)) - xy_margin
+x2 <- ceiling(max(sy_xy$x_local)) + xy_margin
+y1 <- floor(min(sy_xy$y_local)) - xy_margin
+y2 <- ceiling(max(sy_xy$y_local)) + xy_margin
+
+# Ensure integer cell counts
+nx <- round((x2 - x1) / dx_use)
+ny <- round((y2 - y1) / dy_use)
+x2 <- x1 + nx * dx_use  # adjust to exact grid
+y2 <- y1 + ny * dy_use
+
+# Z domain
+z1 <- 0
+z2 <- ceiling(max(wells$z_bottom) + 5)  # 5m below deepest screen
+nz <- round((z2 - z1) / dz_use)
+z2 <- z1 + nz * dz_use  # adjust to exact grid
+
+domain3d <- c(nx, ny, nz, x1, x2, y1, y2, z1, z2)
+cat(sprintf("\nDomain: c(%d, %d, %d, %.1f, %.1f, %.1f, %.1f, %.1f, %.1f)\n",
+            nx, ny, nz, x1, x2, y1, y2, z1, z2))
+
+grid3d <- GenGrid3D(domain3d)
+
+cat(sprintf("Grid: %d cells (nx=%d, ny=%d, nz=%d)\n", grid3d$n, nx, ny, nz))
+cat(sprintf("Resolution: dx=%.2f, dy=%.2f, dz=%.2f\n",
+            grid3d$dx, grid3d$dy, grid3d$dz))
+
+# GenGrid3D does not provide face coordinates; compute them manually
+grid3d$xface <- seq(grid3d$x1, grid3d$x2, length.out = grid3d$nx + 1)
+grid3d$yface <- seq(grid3d$y1, grid3d$y2, length.out = grid3d$ny + 1)
+grid3d$zface <- seq(grid3d$z1, grid3d$z2, length.out = grid3d$nz + 1)
+
+# ---- Check: are SY wells in different cells? ----
+cat("\n=== SY well grid cell assignments ===\n")
+for (i in 1:nrow(sy_xy)) {
+  w <- sy_xy$Well[i]
+  ix <- which.min(abs(sy_xy$x_local[i] - grid3d$xmid))
+  iy <- which.min(abs(sy_xy$y_local[i] - grid3d$ymid))
+  cat(sprintf("  %s: x=%.2f -> cell_ix=%d, y=%.2f -> cell_iy=%d\n",
+              w, sy_xy$x_local[i], ix, sy_xy$y_local[i], iy))
+}
+
+# Check vertical: screen interval coverage
+cat("\n=== Screen interval cell coverage ===\n")
+zmid <- grid3d$zmid
+for (i in 1:nrow(sy_wells_t)) {
+  w  <- sy_wells_t$Well[i]
+  ly <- sy_wells_t$Layer[i]
+  zt <- sy_wells_t$z_top[i]
+  zb <- sy_wells_t$z_bottom[i]
+  ncells <- sum(zmid >= zt & zmid <= zb)
+  cat(sprintf("  %s %s: z=[%.1f, %.1f] -> %d cells\n", w, ly, zt, zb, ncells))
+}
+```
+
+# 7. Plot Well Locations on Grid
+
+```{r plot_wells_grid, fig.width=12, fig.height=10}
+# Prepare well plot data
+well_plot <- wells
+well_plot$WellLayer <- paste(well_plot$Well, well_plot$Layer, sep="_")
+well_plot$z_mid <- (well_plot$z_top + well_plot$z_bottom) / 2
+well_plot$type_label <- ifelse(well_plot$type == "SY (core)", "SY (core)", "K (excluded)")
+
+# XY: wells on grid
+p_xy <- ggplot() +
+  # Grid lines
+  geom_vline(xintercept = grid3d$xface, color = "gray85", linewidth = 0.2) +
+  geom_hline(yintercept = grid3d$yface, color = "gray85", linewidth = 0.2) +
+  # SY wells (used)
+  geom_point(data = well_plot[well_plot$type == "SY (core)", ],
+             aes(x = x_local, y = y_local, shape = Layer),
+             color = "#E41A1C", size = 3.5) +
+  # K wells (excluded)
+  geom_point(data = well_plot[well_plot$type == "K (distant)", ],
+             aes(x = x_local, y = y_local),
+             color = "gray60", size = 2, shape = 4) +
+  geom_text(data = well_plot,
+            aes(x = x_local, y = y_local, label = WellLayer,
+                color = type_label),
+            vjust = -1, size = 2.8) +
+  scale_color_manual(values = c("SY (core)" = "#E41A1C", "K (excluded)" = "gray60")) +
+  scale_shape_manual(values = c("Layer1" = 16, "Layer2" = 17, "Layer3" = 15)) +
+  labs(title = "Well Locations with Grid (SY cluster in focus)",
+       subtitle = sprintf("Grid: %dx%dx%d, dx=%.1fm, dy=%.1fm, dz=%.1fm",
+                          nx, ny, nz, grid3d$dx, grid3d$dy, grid3d$dz),
+       x = "X (m, translated)", y = "Y (m, translated)",
+       color = "Well Type", shape = "Layer") +
+  coord_fixed() +
+  theme_minimal()
+
+# XZ: depth profile with grid
+p_xz <- ggplot() +
+  geom_hline(yintercept = -grid3d$zmid, color = "gray85", linewidth = 0.2) +
+  geom_segment(data = well_plot,
+               aes(x = x_local, xend = x_local,
+                   y = -z_top, yend = -z_bottom,
+                   color = type_label),
+               linewidth = 2) +
+  geom_text(data = well_plot,
+            aes(x = x_local, y = -(z_top - 0.5),
+                label = WellLayer, color = type_label),
+            size = 2.5, angle = 90, hjust = 0) +
+  scale_color_manual(values = c("SY (core)" = "#E41A1C", "K (excluded)" = "gray60")) +
+  labs(title = "Well Screens with Vertical Grid (XZ view)",
+       subtitle = sprintf("dz = %.1f m, %d layers", dz_use, nz),
+       x = "X (m)", y = "Depth z (m, negative = deeper)") +
+  theme_minimal()
+
+# YZ: depth profile
+p_yz <- ggplot() +
+  geom_hline(yintercept = -grid3d$zface, color = "gray85", linewidth = 0.2) +
+  geom_segment(data = well_plot,
+               aes(x = y_local, xend = y_local,
+                   y = -z_top, yend = -z_bottom,
+                   color = type_label),
+               linewidth = 2) +
+  geom_text(data = well_plot,
+            aes(x = y_local, y = -(z_top - 0.5),
+                label = WellLayer, color = type_label),
+            size = 2.5, angle = 90, hjust = 0) +
+  scale_color_manual(values = c("SY (core)" = "#E41A1C", "K (excluded)" = "gray60")) +
+  labs(title = "Well Screens with Vertical Grid (YZ view)",
+       x = "Y (m)", y = "Depth z (m)") +
+  theme_minimal()
+
+grid.arrange(p_xy, p_xz, p_yz, ncol = 2, nrow = 2,
+             layout_matrix = rbind(c(1, 1), c(2, 3)))
+```
+
+# 8. Construct qHT and oHT Lists (with Well Screens + Real Qp)
+
+```{r construct_ht}
+# ---- Build screen lookup ----
+screen_lookup <- wells
+screen_lookup$well_layer <- paste(screen_lookup$Well, screen_lookup$Layer, sep="_")
+
+# Build qHT and oHT
+qHT <- list()
+oHT <- list()
+test_info <- list()
+
+for (ti in seq_along(selected_tests)) {
+  test_name <- selected_tests[ti]
+  cat(sprintf("\n=== Test %d: %s ===\n", ti, test_name))
+
+  # Parse pumping well and layer
+  pump_well_name <- gsub("(一层|二层|三层)$", "", test_name)
+  pump_layer_str <- gsub(".*(一层|二层|三层)$", "\\1", test_name)
+  pump_layer_num <- ifelse(pump_layer_str == "一层", 1,
+                    ifelse(pump_layer_str == "二层", 2, 3))
+
+  # ---- Get pump screen info ----
+  pump_row <- wells[wells$Well == pump_well_name &
+                    wells$Layer == paste0("Layer", pump_layer_num), ]
+  if (nrow(pump_row) == 0) {
+    cat("  WARNING: pump well not found\n")
+    next
+  }
+
+  # ---- Get real pumping rate ----
+  pr <- pump_summary[pump_summary$试验名称 == test_name, ]
+  Qp_real <- if (nrow(pr) > 0 && !is.na(pr$流量_m3min[1])) pr$流量_m3min[1] else 1.0
+  cat(sprintf("  Pump rate Qp = %.4f m3/min\n", Qp_real))
+
+  # ---- Build Qinf ----
+  Qinf <- data.frame(
+    Qp       = Qp_real,
+    x        = pump_row$x_local,
+    y        = pump_row$y_local,
+    z_top    = pump_row$z_top,
+    z_bottom = pump_row$z_bottom
+  )
+  qHT[[test_name]] <- Qinf
+  cat(sprintf("  Pump: x=%.2f, y=%.2f, z=[%.2f, %.2f]\n",
+              Qinf$x, Qinf$y, Qinf$z_top, Qinf$z_bottom))
+
+  # ---- Build Oinf (SY wells only) ----
+  dd_test <- dd_sel_sy[dd_sel_sy$试验名称 == test_name, ]
+  cat(sprintf("  SY observation records: %d\n", nrow(dd_test)))
+
+  Oinf_rows <- data.frame(
+    data      = -dd_test$最终降深.m.,  # negative: drawdown is below zero-drawdown boundary
+    x         = dd_test$x_local,
+    y         = dd_test$y_local,
+    z_top     = numeric(nrow(dd_test)),
+    z_bottom  = numeric(nrow(dd_test)),
+    obs_well  = dd_test$obs_well,
+    layer_num = dd_test$layer_num,
+    stringsAsFactors = FALSE
+  )
+
+  # Fill screen coordinates
+  for (j in seq_len(nrow(Oinf_rows))) {
+    ow <- Oinf_rows$obs_well[j]
+    ln <- Oinf_rows$layer_num[j]
+    sr <- wells[wells$Well == ow & wells$Layer == paste0("Layer", ln), ]
+    if (nrow(sr) > 0) {
+      Oinf_rows$z_top[j]    <- sr$z_top
+      Oinf_rows$z_bottom[j] <- sr$z_bottom
+    } else {
+      Oinf_rows$z_top[j]    <- NA
+      Oinf_rows$z_bottom[j] <- NA
+    }
+  }
+
+  Oinf_rows <- Oinf_rows[!is.na(Oinf_rows$z_top), ]
+  cat(sprintf("  Valid observations: %d\n", nrow(Oinf_rows)))
+
+  # Print observation summary
+  if (nrow(Oinf_rows) > 0) {
+    cat("  Observation drawdowns:\n")
+    print(summary(Oinf_rows$data))
+  }
+
+  Oinf <- Oinf_rows[, c("data", "x", "y", "z_top", "z_bottom")]
+  oHT[[test_name]] <- Oinf
+
+  test_info[[test_name]] <- list(
+    pump_well  = pump_well_name,
+    pump_layer = pump_layer_num,
+    Qp         = Qp_real,
+    Qinf       = Qinf,
+    Oinf       = Oinf
+  )
+}
+
+cat(sprintf("\n=== Summary ===\n"))
+cat(sprintf("Number of pumping tests: %d\n", length(qHT)))
+total_obs <- 0
+for (nm in names(qHT)) {
+  n <- nrow(oHT[[nm]])
+  total_obs <- total_obs + n
+  cat(sprintf("  %s: Qp=%.4f m3/min, %d observations\n",
+              nm, qHT[[nm]]$Qp[1], n))
+}
+cat(sprintf("Total observations across all tests: %d\n", total_obs))
+```
+
+# 9. Drawdown Data Overview
+
+```{r plot_drawdown_overview, fig.width=10, fig.height=6}
+# Combine drawdown data for selected tests (SY only)
+dd_plot <- dd_sel_sy
+dd_plot$obs_well_layer <- paste(dd_plot$obs_well, dd_plot$obs_layer, sep="_")
+
+# Drawdown by observation well
+p1 <- ggplot(dd_plot, aes(x = obs_well_layer, y = 最终降深.m., fill = 试验名称)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  labs(title = "Final Drawdown by Observation Well",
+       x = "Observation Well_Layer", y = "Drawdown (m)") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# Drawdown map (XY, averaged across layers)
+dd_avg <- aggregate(最终降深.m. ~ obs_well + x_local + y_local + 试验名称,
+                    data = dd_plot, FUN = mean)
+p2 <- ggplot(dd_avg, aes(x = x_local, y = y_local, size = 最终降深.m., color = 试验名称)) +
+  geom_point(alpha = 0.7) +
+  geom_text(aes(label = obs_well), vjust = -1.5, size = 3) +
+  scale_size_continuous(range = c(3, 10)) +
+  labs(title = "Drawdown Map (bubble size = drawdown)",
+       x = "X (m)", y = "Y (m)") +
+  coord_fixed() +
+  theme_minimal()
+
+grid.arrange(p1, p2, ncol = 2)
+```
+
+# 10. Forward Simulation (Homogeneous K)
+
+Forward simulation to verify the model setup and estimate effective K.
+
+```{r forward_homogeneous}
+K_try <- c(0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1)
+
+forward_results <- list()
+for (Ki in K_try) {
+  cat(sprintf("\n--- K = %.4f m/min ---\n", Ki))
+  for (ti in seq_along(qHT)) {
+    test_name <- names(qHT)[ti]
+    cat(sprintf("  Test: %s\n", test_name))
+
+    res <- tryCatch({
+      Fsteady3dsim(KK = Ki, Qinf = qHT[[ti]], grid = grid3d, lrw = 20000000)
+    }, error = function(e) {
+      cat(sprintf("    ERROR: %s\n", e$message))
+      return(NULL)
+    })
+
+    if (!is.null(res)) {
+      obs_sampled <- samData3DScreen(Oinf = oHT[[ti]], grid = grid3d,
+                                     h = res$solution)
+      forward_results[[paste0("K", Ki, "_", test_name)]] <- list(
+        result  = res,
+        sampled = obs_sampled,
+        K       = Ki,
+        test    = test_name
+      )
+
+      obs_true <- oHT[[ti]]$data
+      obs_sim  <- obs_sampled$data
+      valid <- !is.na(obs_true) & !is.na(obs_sim) & obs_true < 0 & obs_sim < 0
+      if (sum(valid) > 0) {
+        ratio <- obs_true[valid] / obs_sim[valid]
+        cat(sprintf("    Obs/Sim ratio: mean=%.3f, median=%.3f (n=%d)\n",
+                    mean(ratio), median(ratio), sum(valid)))
+      }
+    }
+  }
+}
+```
+
+# 11. Estimate Effective K from Drawdown Ratios
+
+```{r estimate_K}
+# Collect all ratio data
+ratio_data <- data.frame()
+
+for (nm in names(forward_results)) {
+  fr <- forward_results[[nm]]
+  obs_true <- oHT[[fr$test]]$data
+  obs_sim  <- fr$sampled$data
+  valid <- !is.na(obs_true) & !is.na(obs_sim) & obs_true < 0 & obs_sim < 0
+  if (sum(valid) > 0) {
+    ratio_data <- rbind(ratio_data, data.frame(
+      K = fr$K, ratio = obs_true[valid] / obs_sim[valid],
+      test = fr$test, stringsAsFactors = FALSE
+    ))
+  }
+}
+
+if (nrow(ratio_data) > 0) {
+  cat("Drawdown ratio (observed/simulated) by K:\n")
+  ratio_by_K <- aggregate(ratio ~ K, data = ratio_data,
+                          FUN = function(x) c(mean = mean(x), median = median(x)))
+  for (i in 1:nrow(ratio_by_K)) {
+    cat(sprintf("  K=%.4f: mean_ratio=%.3f, median_ratio=%.3f\n",
+                ratio_by_K$K[i],
+                ratio_by_K$ratio[i, "mean"],
+                ratio_by_K$ratio[i, "median"]))
+  }
+
+  # Estimate K where ratio ≈ 1
+  ratio_med <- aggregate(ratio ~ K, data = ratio_data, FUN = median)
+  names(ratio_med)[2] <- "median_ratio"
+
+  # Linear interpolation in log-log space
+  if (min(ratio_med$median_ratio) < 1 && max(ratio_med$median_ratio) > 1) {
+    lo <- max(which(ratio_med$median_ratio < 1))
+    hi <- min(which(ratio_med$median_ratio > 1))
+    K_est <- 10^(log10(ratio_med$K[lo]) +
+                 (log10(1) - log10(ratio_med$median_ratio[lo])) /
+                 (log10(ratio_med$median_ratio[hi]) -
+                  log10(ratio_med$median_ratio[lo])) *
+                 (log10(ratio_med$K[hi]) - log10(ratio_med$K[lo])))
+  } else {
+    K_est <- ratio_med$K[which.min(abs(ratio_med$median_ratio - 1))]
+  }
+  cat(sprintf("\n=== Estimated effective K: %.6f m/min ===\n", K_est))
+
+  # Plot ratio vs K
+  p_ratio <- ggplot(ratio_data, aes(x = factor(K), y = ratio, fill = test)) +
+    geom_boxplot(alpha = 0.6) +
+    geom_hline(yintercept = 1, linetype = "dashed", color = "red", linewidth = 1) +
+    scale_y_log10() +
+    labs(title = "Observed/Simulated Drawdown Ratio vs K",
+         subtitle = sprintf("Estimated K = %.6f m/min", K_est),
+         x = "K (m/min)", y = "Ratio (observed/simulated)") +
+    theme_minimal()
+  print(p_ratio)
+} else {
+  K_est <- 0.01
+  cat("No valid ratio data. Using default K = 0.01\n")
+}
+```
+
+# 12. 1:1 Plot: Observed vs Simulated (Homogeneous Forward)
+
+```{r plot_obs_vs_sim, fig.width=10, fig.height=7}
+plot_data <- data.frame()
+for (nm in names(forward_results)) {
+  fr <- forward_results[[nm]]
+  obs <- oHT[[fr$test]]$data
+  sim <- fr$sampled$data
+  plot_data <- rbind(plot_data, data.frame(
+    observed = obs, simulated = sim,
+    K = fr$K, test = fr$test,
+    stringsAsFactors = FALSE
+  ))
+}
+
+# Both observed and simulated are negative (drawdown); use absolute for log-log
+plot_data <- plot_data[plot_data$observed < 0 & plot_data$simulated < 0, ]
+plot_data$observed_abs  <- abs(plot_data$observed)
+plot_data$simulated_abs <- abs(plot_data$simulated)
+
+if (nrow(plot_data) > 0) {
+  # Find the K closest to K_est for highlighting
+  best_K <- K_try[which.min(abs(K_try - K_est))]
+  plot_data$best <- plot_data$K == best_K
+
+  p <- ggplot(plot_data, aes(x = observed_abs, y = simulated_abs)) +
+    geom_point(aes(color = factor(K), alpha = best), size = 2.5) +
+    geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "gray50") +
+    scale_alpha_manual(values = c("TRUE" = 1, "FALSE" = 0.3), guide = "none") +
+    scale_x_log10() + scale_y_log10() +
+    facet_wrap(~test, scales = "free") +
+    labs(title = "Observed vs Simulated Drawdown (Homogeneous K)",
+         subtitle = sprintf("Estimated K = %.6f, best trial K = %.4f", K_est, best_K),
+         x = "|Observed| (m)", y = "|Simulated| (m)", color = "K") +
+    theme_minimal()
+  print(p)
+}
+```
+
+# 13. Forward Simulation Drawdown Field
+
+```{r plot_forward_field, fig.width=12, fig.height=10}
+# Plot drawdown field for the best K estimate
+if (exists("K_est") && !is.na(K_est)) {
+  for (ti in seq_along(qHT)) {
+    test_name <- names(qHT)[ti]
+    cat(sprintf("\nPlotting drawdown field: %s, K=%.6f\n", test_name, K_est))
+
+    res_fwd <- Fsteady3dsim(KK = K_est, Qinf = qHT[[ti]], grid = grid3d,
+                            lrw = 20000000)
+
+    # Sample observations
+    obs_sampled <- samData3DScreen(Oinf = oHT[[ti]], grid = grid3d,
+                                   h = res_fwd$solution)
+
+    # Select 3 z-slices: near each layer center
+    z_layers <- unique(grid3d$zmid)
+    z_targets <- c(9, 20, 31)  # approximate centers of 3 screen layers
+    z_sel <- sapply(z_targets, function(zt) z_layers[which.min(abs(z_layers - zt))])
+    z_sel <- unique(z_sel)
+
+    for (z_val in z_sel) {
+      slice_data <- res_fwd[abs(res_fwd$z - z_val) < 1e-10, ]
+
+      # Add observation wells at this depth layer
+      obs_at_z <- obs_sampled
+      # Find which layer this z belongs to
+      layer_label <- if (z_val < 14) "~Layer1" else if (z_val < 26) "~Layer2" else "~Layer3"
+
+      p <- ggplot(slice_data, aes(x = x, y = y, fill = solution)) +
+        geom_tile() +
+        scale_fill_viridis_c(option = "plasma", name = "Drawdown (m)") +
+        # Pump location
+        geom_point(data = qHT[[ti]],
+                   aes(x = x, y = y), color = "red", size = 3, shape = 8,
+                   inherit.aes = FALSE) +
+        # SY observation wells
+        geom_point(data = wells[wells$type == "SY (core)", ],
+                   aes(x = x_local, y = y_local),
+                   color = "white", size = 1.5, alpha = 0.7,
+                   inherit.aes = FALSE) +
+        labs(title = sprintf("Drawdown Field: %s, z=%.1f m (%s)",
+                             test_name, z_val, layer_label),
+             x = "X (m)", y = "Y (m)") +
+        coord_fixed() +
+        theme_minimal()
+      print(p)
+    }
+  }
+}
+```
+
+# 14. Adjoint-Based Inversion (Steady-State 3D with Well Screens)
+
+This section uses the **adjoint-state method** for computing the Jacobian (sensitivity) matrix analytically, replacing the ensemble-based approach. The adjoint method is deterministic and typically faster for problems with moderate grid sizes.
+
+Key differences from the ensemble version:
+- No ensemble / Monte Carlo sampling; uses analytical Jacobian
+- Levenberg-Marquardt damping for regularization
+- Controlled by `sigma2obs` (observation error variance), `lambda_lm` (LM damping), and `decay_lm` (damping decay factor)
+
+```{r inversion_adj}
+# Use estimated K as prior geometric mean
+prior_K <- if (exists("K_est") && !is.na(K_est) && K_est > 0) K_est else 0.01
+
+cat(sprintf("Prior geometric mean K = %.6f m/min\n", prior_K))
+
+# Geo-statistical parameters
+geo_params <- list(
+  me     = log(prior_K),
+  var    = 1.5,
+  geomod = "Exp",
+  range  = 15,
+  nugget = 0.,
+  anis   = c(0, 0, 0, 1, 0.2)
+)
+
+# Adjoint inversion parameters
+itermax <- 20
+sigma2obs <- 1e-4      # observation error variance
+lambda_lm <- 1.0        # initial Levenberg-Marquardt damping
+decay_lm  <- 1.4        # LM damping decay factor
+
+cat(sprintf("Max iterations: %d\n", itermax))
+cat(sprintf("sigma2obs = %.1e, lambda_lm = %.1f, decay_lm = %.1f\n",
+            sigma2obs, lambda_lm, decay_lm))
+cat(sprintf("Grid: %d cells, %d observations\n", grid3d$n,
+            sum(sapply(oHT, nrow))))
+
+# Run adjoint-based inversion
+inv_result_adj <- Finverse3DScreenAdj(
+  grid        = grid3d,
+  qHT         = qHT,
+  oHT         = oHT,
+  itermax     = itermax,
+  rmsemin     = 0,
+  lrw         = 20000000,
+  sigma2obs   = sigma2obs,
+  lambda_lm   = lambda_lm,
+  decay_lm    = decay_lm,
+  geo         = geo_params,
+  ifcor       = FALSE,
+  ifvarTh     = FALSE
+)
+
+cat("\n=== Adjoint inversion completed! ===\n")
+cat(sprintf("Number of iterations: %d\n", length(inv_result_adj)))
+```
+
+# 15. Inversion Results: Convergence and K Field
+
+```{r inv_results_adj, fig.width=14, fig.height=12}
+niter_done <- length(inv_result_adj)
+cat(sprintf("Number of iterations: %d\n", niter_done))
+niter_done = 12
+# ---- RMSE convergence ----
+rmse_vec <- sapply(inv_result_adj, function(x) x$rmse)
+cat("\n=== RMSE Convergence ===\n")
+for (i in seq_along(rmse_vec)) {
+  cat(sprintf("  Iter %d: RMSE = %.6f\n", i, rmse_vec[i]))
+}
+
+rmse_df <- data.frame(iteration = seq_along(rmse_vec), RMSE = rmse_vec)
+p_rmse <- ggplot(rmse_df, aes(x = iteration, y = RMSE)) +
+  geom_line(color = "#377EB8", linewidth = 1) +
+  geom_point(size = 4, color = "#E41A1C") +
+  labs(title = "Convergence: RMSE (Adjoint Method)",
+       x = "Iteration", y = "RMSE") +
+  theme_minimal()
+print(p_rmse)
+
+# ---- Use inversePlot3D for last iteration ----
+figs <- inversePlot3D(
+  niterm = niter_done,
+  grid   = grid3d,
+  iterdf = inv_result_adj,
+  oHT    = oHT,
+  zslice = grid3d$zmid[round(grid3d$nz / 2)]
+)
+
+# Add well locations to ln(K) and variance slices
+sy_wells_plot <- wells[wells$type == "SY (core)", ]
+figs$lnk <- figs$lnk +
+  geom_point(data = sy_wells_plot,
+             aes(x = x_local, y = y_local),
+             color = "white", size = 2, shape = 21, fill = NA,
+             stroke = 0.5, inherit.aes = FALSE) +
+  geom_text(data = sy_wells_plot,
+            aes(x = x_local, y = y_local, label = Well),
+            color = "white", size = 2.5, vjust = -1,
+            inherit.aes = FALSE)
+
+if (!is.null(figs$varlnk)) {
+  figs$varlnk <- figs$varlnk +
+    geom_point(data = sy_wells_plot,
+               aes(x = x_local, y = y_local),
+               color = "white", size = 2, shape = 21, fill = NA,
+               stroke = 0.5, inherit.aes = FALSE) +
+    geom_text(data = sy_wells_plot,
+              aes(x = x_local, y = y_local, label = Well),
+              color = "white", size = 2.5, vjust = -1,
+              inherit.aes = FALSE)
+}
+
+print(ggpubr::ggarrange(plotlist = figs, ncol = 2, nrow = 2))
+
+# ---- K statistics ----
+last_iter <- inv_result_adj[[niter_done]]
+Kmean <- exp(last_iter$meanT)
+cat(sprintf("\nK statistics: mean=%.6f, median=%.6f, sd=%.6f\n",
+            mean(Kmean), median(Kmean), sd(Kmean)))
+cat(sprintf("K range: [%.6f, %.6f]\n", min(Kmean), max(Kmean)))
+```
+
+# 16. Final Comparison: Observed vs Predicted
+
+```{r final_comparison_adj, fig.width=10, fig.height=7}
+K_mean_final <- exp(last_iter$meanT)  # meanT is mean of ln(K)
+
+compare_data <- data.frame()
+for (ti in seq_along(qHT)) {
+  test_name <- names(qHT)[ti]
+
+  res_final <- Fsteady3dsim(KK = K_mean_final, Qinf = qHT[[ti]], grid = grid3d,
+                             lrw = 20000000)
+
+  obs_sampled <- samData3DScreen(Oinf = oHT[[ti]], grid = grid3d,
+                                 h = res_final$solution)
+  compare_data <- rbind(compare_data, data.frame(
+    observed  = oHT[[ti]]$data,
+    predicted = obs_sampled$data,
+    test      = test_name,
+    stringsAsFactors = FALSE
+  ))
+}
+
+compare_data <- compare_data[compare_data$observed < 0 &
+                             compare_data$predicted < 0, ]
+compare_data$observed_abs  <- abs(compare_data$observed)
+compare_data$predicted_abs <- abs(compare_data$predicted)
+
+# Compute R²
+fit <- lm(predicted ~ observed, data = compare_data)
+r2 <- summary(fit)$r.squared
+rmse_val <- sqrt(mean((compare_data$observed - compare_data$predicted)^2))
+
+p <- ggplot(compare_data, aes(x = observed_abs, y = predicted_abs, color = test)) +
+  geom_point(size = 3, alpha = 0.7) +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed",
+              color = "gray50", linewidth = 0.8) +
+  geom_smooth(method = "lm", se = TRUE, aes(group = 1),
+              color = "#377EB8", linewidth = 0.8, alpha = 0.2) +
+  annotate("text",
+           x = max(compare_data$observed_abs) * 0.4,
+           y = max(compare_data$predicted_abs) * 0.9,
+           label = sprintf("R² = %.3f\nRMSE = %.4f m", r2, rmse_val),
+           size = 5, hjust = 0) +
+  scale_x_log10() + scale_y_log10() +
+  labs(title = "Final Comparison: Observed vs Predicted Drawdown (Adjoint)",
+       subtitle = "Using adjoint-inverted heterogeneous K field",
+       x = "|Observed| Drawdown (m)",
+       y = "Predicted Drawdown (m)") +
+  theme_minimal()
+print(p)
+
+cat(sprintf("\n=== Final Statistics (Adjoint) ===\n"))
+cat(sprintf("R-squared: %.4f\n", r2))
+cat(sprintf("RMSE: %.6f m\n", rmse_val))
+
+# Per-test statistics
+for (tn in unique(compare_data$test)) {
+  cd <- compare_data[compare_data$test == tn, ]
+  cat(sprintf("  %s: n=%d, R²=%.4f, RMSE=%.6f\n",
+              tn, nrow(cd),
+              summary(lm(predicted ~ observed, data = cd))$r.squared,
+              sqrt(mean((cd$observed - cd$predicted)^2))))
+}
+```
+
+# 17. Refined Inversion: z-direction Doubled, Adjusted Geo-Parameters
+
+```{r refined_inversion_adj}
+cat("=== Building refined grid (z doubled) ===\n")
+
+# z-direction: double the resolution (half dz)
+dz_refined <- dz_use / 2  # e.g. 3.0 -> 1.5
+nz_refined <- nz * 2
+z2_refined <- z1 + nz_refined * dz_refined
+
+domain3d_refined <- c(nx, ny, nz_refined, x1, x2, y1, y2, z1, z2_refined)
+cat(sprintf("Domain: c(%d, %d, %d, %.1f, %.1f, %.1f, %.1f, %.1f, %.1f)\n",
+            nx, ny, nz_refined, x1, x2, y1, y2, z1, z2_refined))
+
+grid3d_r <- GenGrid3D(domain3d_refined)
+
+cat(sprintf("Grid: %d cells (nx=%d, ny=%d, nz=%d)\n", grid3d_r$n, nx, ny, nz_refined))
+cat(sprintf("Resolution: dx=%.2f, dy=%.2f, dz=%.2f\n",
+            grid3d_r$dx, grid3d_r$dy, grid3d_r$dz))
+
+# Face coordinates
+grid3d_r$xface <- seq(grid3d_r$x1, grid3d_r$x2, length.out = grid3d_r$nx + 1)
+grid3d_r$yface <- seq(grid3d_r$y1, grid3d_r$y2, length.out = grid3d_r$ny + 1)
+grid3d_r$zface <- seq(grid3d_r$z1, grid3d_r$z2, length.out = grid3d_r$nz + 1)
+
+# ---- Check screen coverage on refined grid ----
+cat("\n=== Screen interval cell coverage (refined z) ===\n")
+zmid_r <- grid3d_r$zmid
+for (i in 1:nrow(sy_wells_t)) {
+  w  <- sy_wells_t$Well[i]
+  ly <- sy_wells_t$Layer[i]
+  zt <- sy_wells_t$z_top[i]
+  zb <- sy_wells_t$z_bottom[i]
+  ncells <- sum(zmid_r >= zt & zmid_r <= zb)
+  cat(sprintf("  %s %s: z=[%.1f, %.1f] -> %d cells\n", w, ly, zt, zb, ncells))
+}
+
+# ---- Adjusted geo-parameters: xy range=25, z range=3 ----
+geo_params_refined <- list(
+  me     = log(prior_K),
+  var    = 1.5,
+  geomod = "Exp",
+  range  = 25,                          # major range (x direction)
+  nugget = 0.1,
+  anis   = c(0, 0, 0, 1, 3/25)         # ratio_y=1, ratio_z=3/25=0.12
+)
+
+cat(sprintf("\nGeo-params: xy_range=25, z_range=3\n"))
+
+# ---- Run refined adjoint inversion ----
+inv_result_r_adj <- Finverse3DScreenAdj(
+  grid        = grid3d_r,
+  qHT         = qHT,
+  oHT         = oHT,
+  itermax     = itermax,
+  rmsemin     = 0,
+  lrw         = 20000000,
+  sigma2obs   = sigma2obs,
+  lambda_lm   = lambda_lm,
+  decay_lm    = decay_lm,
+  geo         = geo_params_refined,
+  ifcor       = FALSE,
+  ifvarTh     = FALSE
+)
+
+cat("\n=== Refined adjoint inversion completed! ===\n")
+cat(sprintf("Number of iterations: %d\n", length(inv_result_r_adj)))
+```
+
+```{r refined_results_adj, fig.width=14, fig.height=12}
+niter_r <- length(inv_result_r_adj)
+cat(sprintf("Number of iterations: %d\n", niter_r))
+
+# ---- RMSE convergence ----
+rmse_vec_r <- sapply(inv_result_r_adj, function(x) x$rmse)
+cat("\n=== RMSE Convergence (Refined) ===\n")
+for (i in seq_along(rmse_vec_r)) {
+  cat(sprintf("  Iter %d: RMSE = %.6f\n", i, rmse_vec_r[i]))
+}
+
+rmse_df_r <- data.frame(iteration = seq_along(rmse_vec_r), RMSE = rmse_vec_r)
+p_rmse_r <- ggplot(rmse_df_r, aes(x = iteration, y = RMSE)) +
+  geom_line(color = "#377EB8", linewidth = 1) +
+  geom_point(size = 4, color = "#E41A1C") +
+  labs(title = "Convergence: RMSE — Refined Grid (Adjoint)",
+       x = "Iteration", y = "RMSE") +
+  theme_minimal()
+print(p_rmse_r)
+
+# ---- inversePlot3D ----
+figs_r <- inversePlot3D(
+  niterm = niter_r,
+  grid   = grid3d_r,
+  iterdf = inv_result_r_adj,
+  oHT    = oHT,
+  zslice = grid3d_r$zmid[round(grid3d_r$nz / 2)]
+)
+
+figs_r$lnk <- figs_r$lnk +
+  geom_point(data = sy_wells_plot,
+             aes(x = x_local, y = y_local),
+             color = "white", size = 2, shape = 21, fill = NA,
+             stroke = 0.5, inherit.aes = FALSE) +
+  geom_text(data = sy_wells_plot,
+            aes(x = x_local, y = y_local, label = Well),
+            color = "white", size = 2.5, vjust = -1,
+            inherit.aes = FALSE)
+
+if (!is.null(figs_r$varlnk)) {
+  figs_r$varlnk <- figs_r$varlnk +
+    geom_point(data = sy_wells_plot,
+               aes(x = x_local, y = y_local),
+               color = "white", size = 2, shape = 21, fill = NA,
+               stroke = 0.5, inherit.aes = FALSE) +
+    geom_text(data = sy_wells_plot,
+              aes(x = x_local, y = y_local, label = Well),
+              color = "white", size = 2.5, vjust = -1,
+              inherit.aes = FALSE)
+}
+
+print(ggpubr::ggarrange(plotlist = figs_r, ncol = 2, nrow = 2))
+
+# ---- K statistics ----
+last_iter_r <- inv_result_r_adj[[niter_r]]
+Kmean_r <- exp(last_iter_r$meanT)
+cat(sprintf("\nK statistics (refined): mean=%.6f, median=%.6f, sd=%.6f\n",
+            mean(Kmean_r), median(Kmean_r), sd(Kmean_r)))
+cat(sprintf("K range: [%.6f, %.6f]\n", min(Kmean_r), max(Kmean_r)))
+```
+
+```{r refined_comparison_adj, fig.width=10, fig.height=7}
+# Observed vs Predicted for refined adjoint inversion
+compare_data_r <- data.frame()
+for (ti in seq_along(qHT)) {
+  test_name <- names(qHT)[ti]
+
+  res_final_r <- Fsteady3dsim(KK = Kmean_r, Qinf = qHT[[ti]], grid = grid3d_r,
+                               lrw = 20000000)
+
+  obs_sampled_r <- samData3DScreen(Oinf = oHT[[ti]], grid = grid3d_r,
+                                   h = res_final_r$solution)
+  compare_data_r <- rbind(compare_data_r, data.frame(
+    observed  = oHT[[ti]]$data,
+    predicted = obs_sampled_r$data,
+    test      = test_name,
+    stringsAsFactors = FALSE
+  ))
+}
+
+compare_data_r <- compare_data_r[compare_data_r$observed < 0 &
+                                 compare_data_r$predicted < 0, ]
+compare_data_r$observed_abs  <- abs(compare_data_r$observed)
+compare_data_r$predicted_abs <- abs(compare_data_r$predicted)
+
+fit_r <- lm(predicted ~ observed, data = compare_data_r)
+r2_r <- summary(fit_r)$r.squared
+rmse_r <- sqrt(mean((compare_data_r$observed - compare_data_r$predicted)^2))
+
+p_r <- ggplot(compare_data_r, aes(x = observed_abs, y = predicted_abs, color = test)) +
+  geom_point(size = 3, alpha = 0.7) +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed",
+              color = "gray50", linewidth = 0.8) +
+  geom_smooth(method = "lm", se = TRUE, aes(group = 1),
+              color = "#377EB8", linewidth = 0.8, alpha = 0.2) +
+  annotate("text",
+           x = max(compare_data_r$observed_abs) * 0.4,
+           y = max(compare_data_r$predicted_abs) * 0.9,
+           label = sprintf("R² = %.3f\nRMSE = %.4f m", r2_r, rmse_r),
+           size = 5, hjust = 0) +
+  scale_x_log10() + scale_y_log10() +
+  labs(title = "Refined Adjoint Inversion: Observed vs Predicted Drawdown",
+       subtitle = "z-doubled grid, xy_range=25, z_range=3",
+       x = "|Observed| Drawdown (m)",
+       y = "Predicted Drawdown (m)") +
+  theme_minimal()
+print(p_r)
+
+cat(sprintf("\n=== Refined Final Statistics (Adjoint) ===\n"))
+cat(sprintf("R-squared: %.4f\n", r2_r))
+cat(sprintf("RMSE: %.6f m\n", rmse_r))
+```
+
+# 18. K Field Cross-Section (XZ and YZ Profiles)
+
+```{r xz_profile_adj, fig.width=12, fig.height=6}
+K_grid <- data.frame(grid3d$grid, K = Kmean)
+
+# XZ slice at y ~ middle of SY cluster
+y_mid <- mean(range(wells$y_local[wells$type == "SY (core)"]))
+y_idx <- which.min(abs(grid3d$ymid - y_mid))
+y_val <- grid3d$ymid[y_idx]
+
+K_xz <- K_grid[abs(K_grid$y - y_val) < 1e-10, ]
+K_xz$depth <- -K_xz$z  # negative for display
+
+p_xz <- ggplot(K_xz, aes(x = x, y = depth, fill = log10(K))) +
+  geom_tile() +
+  scale_fill_viridis_c(option = "viridis", name = "log10(K)") +
+  # Overlay screen intervals projected onto this Y slice
+  geom_segment(data = wells[wells$type == "SY (core)" &
+                            abs(wells$y_local - y_val) < 3, ],
+               aes(x = x_local, xend = x_local,
+                   y = -z_top, yend = -z_bottom),
+               color = "white", linewidth = 1.5, inherit.aes = FALSE) +
+  labs(title = sprintf("K Field XZ Cross-Section — Adjoint (y = %.1f m)", y_val),
+       x = "X (m)", y = "Depth (m)") +
+  theme_minimal()
+print(p_xz)
+
+# YZ slice at x ~ middle
+x_mid <- mean(range(wells$x_local[wells$type == "SY (core)"]))
+x_idx <- which.min(abs(grid3d$xmid - x_mid))
+x_val <- grid3d$xmid[x_idx]
+
+K_yz <- K_grid[abs(K_grid$x - x_val) < 1e-10, ]
+K_yz$depth <- -K_yz$z
+
+p_yz <- ggplot(K_yz, aes(x = y, y = depth, fill = log10(K))) +
+  geom_tile() +
+  scale_fill_viridis_c(option = "viridis", name = "log10(K)") +
+  geom_segment(data = wells[wells$type == "SY (core)" &
+                            abs(wells$x_local - x_val) < 3, ],
+               aes(x = y_local, xend = y_local,
+                   y = -z_top, yend = -z_bottom),
+               color = "white", linewidth = 1.5, inherit.aes = FALSE) +
+  labs(title = sprintf("K Field YZ Cross-Section — Adjoint (x = %.1f m)", x_val),
+       x = "Y (m)", y = "Depth (m)") +
+  theme_minimal()
+print(p_yz)
+
+```
+
+# Session Info
+
+```{r session_info}
+sessionInfo()
+```

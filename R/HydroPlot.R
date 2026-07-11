@@ -615,34 +615,53 @@ inversePlot3D <- function(niterm  = 1,
   idx <- seq((iz - 1L) * grid$nx * grid$ny + 1L,
              iz        * grid$nx * grid$ny)
 
-  df_slice <- data.frame(
-    x   = grid$grid$x[idx],
-    y   = grid$grid$y[idx],
-    v   = iterdf[[niterm]]$meanT[idx],
-    var = iterdf[[niterm]]$varT[idx]
-  )
+  # ---- panel 1: mean ln(K) slice (always present) ---------------------------
+  if ("varT" %in% names(iterdf[[niterm]]) && !is.null(iterdf[[niterm]]$varT)) {
+    df_slice <- data.frame(
+      x   = grid$grid$x[idx],
+      y   = grid$grid$y[idx],
+      v   = iterdf[[niterm]]$meanT[idx],
+      var = iterdf[[niterm]]$varT[idx]
+    )
+  } else {
+    df_slice <- data.frame(
+      x = grid$grid$x[idx],
+      y = grid$grid$y[idx],
+      v = iterdf[[niterm]]$meanT[idx]
+    )
+  }
 
-  # ---- panel 1: mean ln(K) slice --------------------------------------------
   p1 <- ggplot(df_slice, aes(x = x, y = y, fill = v)) +
     geom_tile() +
     scale_fill_viridis_c(option = "viridis") +
     labs(title = paste0(p1title, " (z = ", round(zslice, 2), " m)"),
          x = p1xlab, y = p1ylab, fill = p1z)
 
-  # ---- panel 2: variance slice ----------------------------------------------
-  p2 <- ggplot(df_slice, aes(x = x, y = y, fill = var)) +
-    geom_tile() +
-    scale_fill_viridis_c(option = "magma") +
-    labs(title = paste0(p2title, " (z = ", round(zslice, 2), " m)"),
-         x = p2xlab, y = p2ylab, fill = p2z)
+  # ---- panel 2: variance slice (only if varT exists) ------------------------
+  if ("varT" %in% names(iterdf[[niterm]]) && !is.null(iterdf[[niterm]]$varT)) {
+    p2 <- ggplot(df_slice, aes(x = x, y = y, fill = var)) +
+      geom_tile() +
+      scale_fill_viridis_c(option = "magma") +
+      labs(title = paste0(p2title, " (z = ", round(zslice, 2), " m)"),
+           x = p2xlab, y = p2ylab, fill = p2z)
+  } else {
+    p2 <- NULL
+  }
 
-  # ---- panel 3: drawdown scatter (identical logic to inversePlot) -----------
+  # ---- panel 3: drawdown scatter --------------------------------------------
   oHTdf  <- bind_rows(oHT, .id = 'id')
   trueh  <- oHTdf$data
-  dfh    <- data.frame(trueh  = -trueh,
-                       simh   = -iterdf[[niterm]]$meanobsh,
-                       varh   =  iterdf[[niterm]]$varobsh,
-                       ntest  =  oHTdf$id)
+  has_varobsh <- "varobsh" %in% names(iterdf[[niterm]]) && !is.null(iterdf[[niterm]]$varobsh)
+  if (has_varobsh) {
+    dfh <- data.frame(trueh  = -trueh,
+                      simh   = -iterdf[[niterm]]$meanobsh,
+                      varh   =  iterdf[[niterm]]$varobsh,
+                      ntest  =  oHTdf$id)
+  } else {
+    dfh <- data.frame(trueh  = -trueh,
+                      simh   = -iterdf[[niterm]]$meanobsh,
+                      ntest  =  oHTdf$id)
+  }
   xm <- max(dfh$trueh); xn <- min(dfh$trueh)
   ym <- max(dfh$simh);  yn <- min(dfh$simh)
   tb  <- tibble(round(statData(dfh[, 1:2]), 3))
@@ -650,10 +669,6 @@ inversePlot3D <- function(niterm  = 1,
                 y = yn + 0.01  * (ym - yn),
                 tb = list(tb))
   p3 <- ggplot(dfh) +
-    geom_errorbar(aes(x = trueh,
-                      ymin = simh - varh^0.5,
-                      ymax = simh + varh^0.5),
-                  width = 0.02, colour = "gray") +
     geom_point(aes(x = trueh, y = simh, colour = ntest), size = 3) +
     geom_smooth(aes(x = trueh, y = simh), method = "lm", se = FALSE) +
     stat_regline_equation(aes(x = trueh, y = simh),
@@ -661,6 +676,12 @@ inversePlot3D <- function(niterm  = 1,
                           label.y = ym - 0.01 * (ym - yn)) +
     geom_table(data = dft, aes(x = x, y = y, label = tb)) +
     labs(title = p3title, x = p3xlab, y = p3ylab)
+  if (has_varobsh) {
+    p3 <- p3 + geom_errorbar(aes(x = trueh,
+                                 ymin = simh - varh^0.5,
+                                 ymax = simh + varh^0.5),
+                             width = 0.02, colour = "gray")
+  }
 
   # ---- panel 4 (optional): true vs estimated ln(K) -------------------------
   if (!is.null(trueK)) {
@@ -681,10 +702,16 @@ inversePlot3D <- function(niterm  = 1,
       geom_table(data = dft, aes(x = x, y = y, label = tb)) +
       labs(title = p4title, x = p4xlab, y = p4ylab)
 
-    return(list(lnk = p1, varlnk = p2, headscatter = p3, lnkscatter = p4))
+    if (!is.null(p2))
+      return(list(lnk = p1, varlnk = p2, headscatter = p3, lnkscatter = p4))
+    else
+      return(list(lnk = p1, headscatter = p3, lnkscatter = p4))
   }
 
-  return(list(lnk = p1, varlnk = p2, headscatter = p3))
+  if (!is.null(p2))
+    return(list(lnk = p1, varlnk = p2, headscatter = p3))
+  else
+    return(list(lnk = p1, headscatter = p3))
 }
 
 
@@ -1221,6 +1248,164 @@ covhkPlot3D <- function(covhk,
   }
 
   data.frame(x = x, y = y, label = label, stringsAsFactors = FALSE)
+}
+
+
+# ==============================================================================
+# Jacobian (sensitivity) visualisation — 2D steady & transient
+# ==============================================================================
+
+#' Plot Jacobian sensitivity maps for 2D hydraulic tomography
+#'
+#' Visualises the sensitivity of each observation's head to the
+#' log-transmissivity \eqn{\ln T} at every grid cell.  Each observation
+#' is shown as a separate tile-map panel, faceted so that many observations
+#' can be inspected at once.  Works with the output of
+#' \code{\link{jacobian2D}} (steady-state) and \code{\link{jacobian2DTr}}
+#' (transient).
+#'
+#' Positive sensitivity (red) means increasing \eqn{T} at that cell raises
+#' the observed head; negative sensitivity (blue) means it lowers it.
+#'
+#' @param J      \code{nobs × n} Jacobian matrix from
+#'   \code{jacobian2D()} or \code{jacobian2DTr()}.
+#' @param grid   grid list from \code{GenGrid()}.
+#' @param oHT    list of observation data frames used to compute \code{J}
+#'   (columns \code{data, x, y} for steady, plus \code{time} for transient).
+#'   If supplied, observation labels include coordinates and times.
+#' @param maxobs maximum number of observation panels to display (default
+#'   \code{16}).  Observations beyond \code{maxobs} are omitted to keep the
+#'   plot readable.  Set to \code{Inf} to show all.
+#' @param ncol   number of facet columns (default \code{4}).
+#' @param palette \code{viridis} palette option (default \code{"RdBu"} —
+#'   uses \code{ggplot2}'s built-in diverging palette, not \code{viridis}).
+#' @param title  plot title.  Auto-generated if \code{NULL}.
+#' @param zlab   colour-bar label.  Default \code{expression(partial(h) /
+#'   partial(lnT))}.
+#' @param xlab,ylab axis labels (default \code{"X/m"}, \code{"Y/m"}).
+#' @param plotfile optional PDF file path.
+#' @param plotwidth,plotheight PDF dimensions in inches.
+#' @return A \code{ggplot} object.
+#' @export
+#' @examples
+#' \dontrun{
+#' grid <- GenGrid(c(20, 20, 0, 20, 0, 20))
+#' set.seed(123)
+#' TT <- random2d(nsim = 1, grid = grid)$Tp
+#' qHT <- list(data.frame(Qp = 10, x = 10.5, y = 10.5))
+#' oHT <- list(data.frame(data = -1, x = 5.5, y = 5.5))
+#' J   <- jacobian2D(grid = grid, TT = TT, qHT = qHT, oHT = oHT)
+#' PlotJ2d(J, grid, oHT)
+#'
+#' # transient example
+#' oHTt <- list(data.frame(data = -1, x = 5.5, y = 5.5, time = 50))
+#' Jt   <- jacobian2DTr(grid = grid, TT = TT, SS = 1e-4,
+#'                      qHT = qHT, oHT = oHTt)
+#' PlotJ2d(Jt, grid, oHTt)
+#' }
+PlotJ2d <- function(J,
+                     grid,
+                     oHT       = NULL,
+                     maxobs    = 16,
+                     ncol      = 4,
+                     palette   = "RdBu",
+                     title     = NULL,
+                     zlab      = NULL,
+                     xlab      = "X/m",
+                     ylab      = "Y/m",
+                     plotfile  = NULL,
+                     plotwidth = 10,
+                     plotheight = 8) {
+
+  require('ggplot2')
+
+  n   <- grid$n
+  nx  <- grid$nx
+  ny  <- grid$ny
+  nobs <- nrow(J)
+
+  if (ncol(J) != n) {
+    stop("ncol(J) = ", ncol(J), " does not match grid$n = ", n)
+  }
+
+  # ---- auto-generate observation labels ---------------------------------------
+  obs_label <- paste0("Obs", seq_len(nobs))
+  if (!is.null(oHT)) {
+    require(dplyr)
+    odf <- dplyr::bind_rows(oHT, .id = "test")
+    if (nrow(odf) != nobs) {
+      warning("nrow(flattened oHT) != nrow(J); using generic observation labels")
+    } else {
+      if ("time" %in% names(odf)) {
+        # transient
+        obs_label <- paste0("(", round(odf$x, 1), ", ",
+                            round(odf$y, 1), ", t=", round(odf$time, 1), ")")
+      } else {
+        # steady
+        obs_label <- paste0("(", round(odf$x, 1), ", ", round(odf$y, 1), ")")
+      }
+      # if multiple tests, prefix with test ID
+      if (length(unique(odf$test)) > 1) {
+        obs_label <- paste0(odf$test, " ", obs_label)
+      }
+    }
+  }
+
+  # ---- limit number of panels -------------------------------------------------
+  if (nobs > maxobs) {
+    message("Showing ", maxobs, " of ", nobs, " observations. Set maxobs = Inf to show all.")
+    nobs_show <- maxobs
+  } else {
+    nobs_show <- nobs
+  }
+
+  # ---- build long-format data frame -------------------------------------------
+  df_list <- vector("list", nobs_show)
+  for (i in seq_len(nobs_show)) {
+    df_list[[i]] <- data.frame(
+      x        = grid$grid$x,
+      y        = grid$grid$y,
+      sens     = as.vector(J[i, ]),
+      obs      = factor(obs_label[i], levels = obs_label[seq_len(nobs_show)]),
+      stringsAsFactors = FALSE
+    )
+  }
+  df <- do.call(rbind, df_list)
+
+  # ---- defaults ---------------------------------------------------------------
+  if (is.null(title)) {
+    title <- if ("time" %in% names(oHT[[1]])) {
+      "2D Transient Jacobian Sensitivity"
+    } else {
+      "2D Steady-State Jacobian Sensitivity"
+    }
+  }
+  if (is.null(zlab)) {
+    zlab <- expression(partial(h) / partial(lnT))
+  }
+
+  # ---- diverging colour scale -------------------------------------------------
+  # find symmetric limits
+  abs_max <- max(abs(df$sens), na.rm = TRUE)
+  if (abs_max < 1e-12) abs_max <- 1  # avoid zero range
+
+  # ---- plot -------------------------------------------------------------------
+  p <- ggplot(df, aes(x = x, y = y, fill = sens)) +
+    geom_tile() +
+    scale_fill_gradient2(low = "#2166AC", mid = "#F7F7F7", high = "#B2182B",
+                         midpoint = 0, limits = c(-abs_max, abs_max)) +
+    facet_wrap(~ obs, ncol = ncol) +
+    labs(title = title, x = xlab, y = ylab, fill = zlab) +
+    coord_fixed() +
+    theme_minimal() +
+    theme(panel.grid = element_blank(),
+          strip.text = element_text(size = 7))
+
+  if (!is.null(plotfile)) {
+    ggsave(plotfile, width = plotwidth, height = plotheight)
+  }
+
+  return(p)
 }
 
 

@@ -1307,6 +1307,343 @@ Finverse3DScreen <- function(
 
 
 # ==============================================================================
+# 3D Adjoint-state sensitivity computation
+# ==============================================================================
+
+#' Solve the adjoint equation for a single observation point (3D steady-state)
+#'
+#' 3D counterpart of \code{\link{adjoint2D}}.  For the 3D steady-state
+#' groundwater flow equation \eqn{\nabla \cdot (K \nabla h) = Q}, the adjoint
+#' state \eqn{\lambda} for an observation at cell \code{iobs} satisfies:
+#' \deqn{\nabla \cdot (K \nabla \lambda) = \delta(\mathbf{x} - \mathbf{x}_{iobs})}
+#' with homogeneous (zero) boundary conditions.  The adjoint variable is used
+#' to compute the Jacobian (sensitivity) matrix via:
+#' \deqn{\frac{\partial h_{iobs}}{\partial (\ln K)_k} =
+#'       -K_k \, \nabla h|_k \cdot \nabla \lambda|_k \, \Delta x \, \Delta y \, \Delta z}
+#'
+#' @param grid    grid list from \code{GenGrid3D()}.
+#' @param KK      hydraulic conductivity field \eqn{K} \code{[L/T]}, length-\code{n} vector.
+#' @param iobs    scalar integer, the flat element index of the observation point.
+#' @param lrw     real work array length for \code{steady.3D} (default 20000000).
+#' @return Numeric vector of adjoint variable \eqn{\lambda} (length \code{n}).
+#' @keywords internal
+adjoint3D <- function(grid, KK, iobs, lrw = 20000000) {
+  require('rootSolve')
+
+  n   <- grid$n
+  nx  <- grid$nx
+  ny  <- grid$ny
+  nz  <- grid$nz
+  dx  <- grid$dx
+  dy  <- grid$dy
+  dz  <- grid$dz
+
+  Kp <- if (length(KK) == 1) rep(KK, n) else KK
+
+  # Convert flat index iobs to (Nxp, Nyp, Nzp)
+  Nxp <- ((iobs - 1) %% nx) + 1
+  Nyp <- (((iobs - 1) %/% nx) %% ny) + 1
+  Nzp <- ((iobs - 1) %/% (nx * ny)) + 1
+
+  # Adjoint source: unit extraction at the observation cell
+  Qp_adj <- (-dx * dy * dz)
+
+  para <- list(dx = dx, dy = dy, dz = dz,
+               nx = nx, ny = ny, nz = nz,
+               Kp = Kp, Qp = Qp_adj,
+               Nxp = Nxp, Nyp = Nyp, Nzp = Nzp)
+
+  y_init <- rep(0, n)
+  s_adj <- steady.3D(y = y_init, parms = para,
+                     func = diffusion3D_GW, dimens = c(nx, ny, nz), lrw = lrw)$y
+
+  return(s_adj)
+}
+
+
+#' Compute the Jacobian (sensitivity) matrix via the adjoint-state method (3D)
+#'
+#' 3D counterpart of \code{\link{jacobian2D}}.  For 3D steady-state hydraulic
+#' tomography, computes the Jacobian matrix
+#' \eqn{\mathbf{J} = \partial \mathbf{h} / \partial (\ln \mathbf{K})}
+#' (dimension \code{nobs × nelem}) using the adjoint-state method.
+#'
+#' For each pumping test \eqn{j} and each observation \eqn{i}:
+#' \enumerate{
+#'   \item Solve the forward problem to obtain head field \eqn{h}
+#'   \item Solve the adjoint problem to obtain \eqn{\lambda_i}
+#'   \item Compute sensitivity:
+#'         \eqn{J_{ik} = -K_k \, (\nabla h|_k \cdot \nabla \lambda_i|_k) \, \Delta x \, \Delta y \, \Delta z}
+#' }
+#'
+#' @param grid    grid list from \code{GenGrid3D()}.
+#' @param KK      hydraulic conductivity field \eqn{K} \code{[L/T]}, length-\code{n} vector.
+#' @param qHT     list of pumping test data frames (columns \code{Qp, x, y, z}).
+#' @param oHT     list of observation data frames (columns \code{data, x, y, z}).
+#' @param lrw     real work array length for \code{steady.3D} (default 20000000).
+#' @return A matrix of dimension \code{nobs × nelem}.
+#' @export
+jacobian3D <- function(grid,
+                       KK,
+                       qHT = list(data.frame(Qp = 10, x = 7.5, y = 7.5, z = 2.5)),
+                       oHT = list(data.frame(data = -1, x = 5, y = 5, z = 2.5)),
+                       lrw = 20000000) {
+
+  require('rootSolve')
+
+  nHT  <- length(qHT)
+  n    <- grid$n
+  nx   <- grid$nx
+  ny   <- grid$ny
+  nz   <- grid$nz
+  dx   <- grid$dx
+  dy   <- grid$dy
+  dz   <- grid$dz
+  dV   <- dx * dy * dz
+
+  # ---- Collect observation element indices and counts ----
+  loc_obsHT <- list()
+  nobs_per_test <- integer(nHT)
+  for (j in seq_len(nHT)) {
+    oinf <- oHT[[j]]
+    oelemdf <- getOelem3D(grid = grid, Oinf = oinf)
+    loc_obsHT[[j]] <- oelemdf$nelem
+    nobs_per_test[j] <- nrow(oinf)
+  }
+  nobs <- sum(nobs_per_test)
+
+  Kp <- if (length(KK) == 1) rep(KK, n) else KK
+
+  # ---- Pre-allocate Jacobian ----
+  J <- matrix(0, nrow = nobs, ncol = n)
+
+  # ---- Row offset tracker ----
+  row_offset <- 0
+
+  for (j in seq_len(nHT)) {
+    qinf <- qHT[[j]]
+    obs_elem <- loc_obsHT[[j]]
+    nlocal <- length(obs_elem)
+
+    # --- Forward solve for pumping test j ---
+    h_forward <- Fsteady3dsim(grid = grid, KK = Kp, Qinf = qinf, lrw = lrw)$solution
+    h_arr <- array(h_forward, dim = c(nx, ny, nz))
+
+    # --- Compute forward head gradients (cell-centred) ---
+    dhdx <- array(0, dim = c(nx, ny, nz))
+    dhdy <- array(0, dim = c(nx, ny, nz))
+    dhdz <- array(0, dim = c(nx, ny, nz))
+
+    if (nx > 1) {
+      dhdx[2:(nx - 1), , ] <- (h_arr[3:nx, , ] - h_arr[1:(nx - 2), , ]) / (2 * dx)
+      dhdx[1, , ]  <- (h_arr[2, , ] - h_arr[1, , ]) / dx
+      dhdx[nx, , ] <- (h_arr[nx, , ] - h_arr[nx - 1, , ]) / dx
+    }
+    if (ny > 1) {
+      dhdy[, 2:(ny - 1), ] <- (h_arr[, 3:ny, ] - h_arr[, 1:(ny - 2), ]) / (2 * dy)
+      dhdy[, 1, ]  <- (h_arr[, 2, ] - h_arr[, 1, ]) / dy
+      dhdy[, ny, ] <- (h_arr[, ny, ] - h_arr[, ny - 1, ]) / dy
+    }
+    if (nz > 1) {
+      dhdz[, , 2:(nz - 1)] <- (h_arr[, , 3:nz] - h_arr[, , 1:(nz - 2)]) / (2 * dz)
+      dhdz[, , 1]  <- (h_arr[, , 2] - h_arr[, , 1]) / dz
+      dhdz[, , nz] <- (h_arr[, , nz] - h_arr[, , nz - 1]) / dz
+    }
+
+    # --- For each observation in this test, solve adjoint and compute sensitivity ---
+    for (i_local in seq_len(nlocal)) {
+      iobs <- obs_elem[i_local]
+      global_row <- row_offset + i_local
+
+      # Solve adjoint equation
+      lambda <- adjoint3D(grid = grid, KK = Kp, iobs = iobs, lrw = lrw)
+      lambda_arr <- array(lambda, dim = c(nx, ny, nz))
+
+      # Compute adjoint gradients
+      dldx <- array(0, dim = c(nx, ny, nz))
+      dldy <- array(0, dim = c(nx, ny, nz))
+      dldz <- array(0, dim = c(nx, ny, nz))
+
+      if (nx > 1) {
+        dldx[2:(nx - 1), , ] <- (lambda_arr[3:nx, , ] - lambda_arr[1:(nx - 2), , ]) / (2 * dx)
+        dldx[1, , ]  <- (lambda_arr[2, , ] - lambda_arr[1, , ]) / dx
+        dldx[nx, , ] <- (lambda_arr[nx, , ] - lambda_arr[nx - 1, , ]) / dx
+      }
+      if (ny > 1) {
+        dldy[, 2:(ny - 1), ] <- (lambda_arr[, 3:ny, ] - lambda_arr[, 1:(ny - 2), ]) / (2 * dy)
+        dldy[, 1, ]  <- (lambda_arr[, 2, ] - lambda_arr[, 1, ]) / dy
+        dldy[, ny, ] <- (lambda_arr[, ny, ] - lambda_arr[, ny - 1, ]) / dy
+      }
+      if (nz > 1) {
+        dldz[, , 2:(nz - 1)] <- (lambda_arr[, , 3:nz] - lambda_arr[, , 1:(nz - 2)]) / (2 * dz)
+        dldz[, , 1]  <- (lambda_arr[, , 2] - lambda_arr[, , 1]) / dz
+        dldz[, , nz] <- (lambda_arr[, , nz] - lambda_arr[, , nz - 1]) / dz
+      }
+
+      # Sensitivity: J_{ik} = -K_k * (grad_h_k · grad_lambda_i_k) * dV
+      grad_dot <- as.vector(dhdx * dldx + dhdy * dldy + dhdz * dldz)
+      J[global_row, ] <- -Kp * grad_dot * dV
+    }
+
+    row_offset <- row_offset + nlocal
+  }
+
+  return(J)
+}
+
+
+#' Compute the Jacobian for 3D well-screen observations
+#'
+#' Like \code{\link{jacobian3D}} but for well-screen (vertical interval)
+#' observations.  Each observation is the arithmetic average of heads over
+#' a set of grid cells in the screen interval.  The sensitivity row for such
+#' an observation is the weighted average of the point-sensitivities over
+#' those cells.
+#'
+#' @param grid    grid list from \code{GenGrid3D()}.
+#' @param KK      hydraulic conductivity field \eqn{K} \code{[L/T]}, length-\code{n} vector.
+#' @param qHT     list of pumping test data frames with columns
+#'   \code{Qp, x, y, z_top, z_bottom} (well-screen pumping) or
+#'   \code{Qp, x, y, z} (point pumping).
+#' @param oHT     list of observation data frames with columns
+#'   \code{data, x, y, z_top, z_bottom}.
+#' @param lrw     real work array length for \code{steady.3D} (default 20000000).
+#' @return A matrix of dimension \code{nobs × nelem}.
+#' @export
+jacobian3DScreen <- function(grid,
+                             KK,
+                             qHT = list(data.frame(Qp = 10, x = 7.5, y = 7.5,
+                                                   z_top = 2, z_bottom = 3)),
+                             oHT = list(data.frame(data = -1, x = 5, y = 5,
+                                                   z_top = 1, z_bottom = 4)),
+                             lrw = 20000000) {
+
+  require('rootSolve')
+
+  nHT  <- length(qHT)
+  n    <- grid$n
+  nx   <- grid$nx
+  ny   <- grid$ny
+  nz   <- grid$nz
+  dx   <- grid$dx
+  dy   <- grid$dy
+  dz   <- grid$dz
+  dV   <- dx * dy * dz
+
+  # ---- For each observation, determine which grid cells belong to the screen ----
+  obs_elem_list <- list()   # list of cell-index vectors, one per observation
+  nobs_per_test <- integer(nHT)
+  for (j in seq_len(nHT)) {
+    oinf <- oHT[[j]]
+    nobs_per_test[j] <- nrow(oinf)
+    for (r in seq_len(nrow(oinf))) {
+      x_obs <- oinf$x[r]
+      y_obs <- oinf$y[r]
+      z_lo  <- min(oinf$z_top[r], oinf$z_bottom[r])
+      z_hi  <- max(oinf$z_top[r], oinf$z_bottom[r])
+
+      ix <- which.min(abs(grid$xmid - x_obs))
+      iy <- which.min(abs(grid$ymid - y_obs))
+      iz_vec <- which(grid$zmid >= z_lo & grid$zmid <= z_hi)
+      if (length(iz_vec) == 0) {
+        iz_vec <- which.min(abs(grid$zmid - mean(c(z_lo, z_hi))))
+      }
+
+      # flat element indices for cells in this screen
+      elems <- integer(0)
+      for (iz in iz_vec) {
+        elems <- c(elems, (iz - 1L) * nx * ny + (iy - 1L) * nx + ix)
+      }
+      obs_elem_list[[length(obs_elem_list) + 1]] <- elems
+    }
+  }
+  nobs <- sum(nobs_per_test)
+
+  Kp <- if (length(KK) == 1) rep(KK, n) else KK
+
+  # ---- Pre-allocate Jacobian ----
+  J <- matrix(0, nrow = nobs, ncol = n)
+
+  # ---- Global observation index tracker ----
+  obs_global <- 0
+
+  for (j in seq_len(nHT)) {
+    qinf <- qHT[[j]]
+    nlocal <- nobs_per_test[j]
+
+    # --- Forward solve for pumping test j ---
+    h_forward <- Fsteady3dsim(grid = grid, KK = Kp, Qinf = qinf, lrw = lrw)$solution
+    h_arr <- array(h_forward, dim = c(nx, ny, nz))
+
+    # --- Compute forward head gradients (cell-centred) ---
+    dhdx <- array(0, dim = c(nx, ny, nz))
+    dhdy <- array(0, dim = c(nx, ny, nz))
+    dhdz <- array(0, dim = c(nx, ny, nz))
+
+    if (nx > 1) {
+      dhdx[2:(nx - 1), , ] <- (h_arr[3:nx, , ] - h_arr[1:(nx - 2), , ]) / (2 * dx)
+      dhdx[1, , ]  <- (h_arr[2, , ] - h_arr[1, , ]) / dx
+      dhdx[nx, , ] <- (h_arr[nx, , ] - h_arr[nx - 1, , ]) / dx
+    }
+    if (ny > 1) {
+      dhdy[, 2:(ny - 1), ] <- (h_arr[, 3:ny, ] - h_arr[, 1:(ny - 2), ]) / (2 * dy)
+      dhdy[, 1, ]  <- (h_arr[, 2, ] - h_arr[, 1, ]) / dy
+      dhdy[, ny, ] <- (h_arr[, ny, ] - h_arr[, ny - 1, ]) / dy
+    }
+    if (nz > 1) {
+      dhdz[, , 2:(nz - 1)] <- (h_arr[, , 3:nz] - h_arr[, , 1:(nz - 2)]) / (2 * dz)
+      dhdz[, , 1]  <- (h_arr[, , 2] - h_arr[, , 1]) / dz
+      dhdz[, , nz] <- (h_arr[, , nz] - h_arr[, , nz - 1]) / dz
+    }
+
+    # --- For each screen observation, average point-sensitivities ---
+    for (i_local in seq_len(nlocal)) {
+      obs_global <- obs_global + 1
+      screen_elems <- obs_elem_list[[obs_global]]
+      ns <- length(screen_elems)
+
+      J_row <- rep(0, n)
+
+      for (k in seq_len(ns)) {
+        iobs <- screen_elems[k]
+
+        # Solve adjoint for this cell
+        lambda <- adjoint3D(grid = grid, KK = Kp, iobs = iobs, lrw = lrw)
+        lambda_arr <- array(lambda, dim = c(nx, ny, nz))
+
+        dldx <- array(0, dim = c(nx, ny, nz))
+        dldy <- array(0, dim = c(nx, ny, nz))
+        dldz <- array(0, dim = c(nx, ny, nz))
+
+        if (nx > 1) {
+          dldx[2:(nx - 1), , ] <- (lambda_arr[3:nx, , ] - lambda_arr[1:(nx - 2), , ]) / (2 * dx)
+          dldx[1, , ]  <- (lambda_arr[2, , ] - lambda_arr[1, , ]) / dx
+          dldx[nx, , ] <- (lambda_arr[nx, , ] - lambda_arr[nx - 1, , ]) / dx
+        }
+        if (ny > 1) {
+          dldy[, 2:(ny - 1), ] <- (lambda_arr[, 3:ny, ] - lambda_arr[, 1:(ny - 2), ]) / (2 * dy)
+          dldy[, 1, ]  <- (lambda_arr[, 2, ] - lambda_arr[, 1, ]) / dy
+          dldy[, ny, ] <- (lambda_arr[, ny, ] - lambda_arr[, ny - 1, ]) / dy
+        }
+        if (nz > 1) {
+          dldz[, , 2:(nz - 1)] <- (lambda_arr[, , 3:nz] - lambda_arr[, , 1:(nz - 2)]) / (2 * dz)
+          dldz[, , 1]  <- (lambda_arr[, , 2] - lambda_arr[, , 1]) / dz
+          dldz[, , nz] <- (lambda_arr[, , nz] - lambda_arr[, , nz - 1]) / dz
+        }
+
+        grad_dot <- as.vector(dhdx * dldx + dhdy * dldy + dhdz * dldz)
+        J_row <- J_row + (-Kp * grad_dot * dV)
+      }
+
+      J[obs_global, ] <- J_row / ns
+    }
+  }
+
+  return(J)
+}
+
+
+# ==============================================================================
 # Adjoint-state sensitivity computation for 2D steady-state HT
 # ==============================================================================
 
@@ -1723,6 +2060,956 @@ FinverseAdj <- function(
 
     # --- Store iteration results ---
     # Use the same variable names as Finverse3 for compatibility with inversePlot
+    iterdf[[niter]] <- list(
+      meanT    = as.vector(m),
+      varT     = varT,
+      meanobsh = meanobsh,
+      varobsh  = varobsh,
+      m        = m,
+      h_sim    = h_sim_vec,
+      rmse     = rmse,
+      l2       = l2,
+      l1       = l1
+    )
+
+    if (niter == 1) {
+      iterdf[[niter]]$J <- J
+      print("--- time for one iteration ---")
+      print(difftime(Sys.time(), startTime))
+    }
+
+    niter <- niter + 1
+    lambda_lm <- lambda_lm / decay_lm
+  }
+
+  print("--- total time ---")
+  print(difftime(Sys.time(), startTime))
+  return(iterdf)
+}
+
+
+# ==============================================================================
+# 2D Transient Adjoint-based Inversion
+# ==============================================================================
+
+#' 2D Transient adjoint (Green's function) solver
+#'
+#' Computes the adjoint variable \eqn{\varphi(\mathbf{x}, t)} for a 2D
+#' transient groundwater flow problem by solving the **forward** Green's
+#' function equation with a unit injection at the observation cell
+#' \eqn{\mathbf{x}_o}:
+#' \deqn{S \frac{\partial \varphi}{\partial t} =
+#'       \nabla \cdot (T \nabla \varphi) + \delta(\mathbf{x}-\mathbf{x}_o)\delta(t)}
+#' subject to zero initial and boundary conditions.
+#'
+#' In practice, the impulse source is replaced by a continuous unit injection
+#' (Q = -1 in the code convention), giving the step response \eqn{\Phi}.
+#' The impulse response (adjoint) is then obtained by finite-differencing
+#' \eqn{\Phi} in time:
+#' \deqn{\varphi(\mathbf{x}, t) \approx \frac{\partial \Phi}{\partial t}}
+#'
+#' For a fixed observation location, the same \eqn{\varphi} time series can be
+#' reused for every observation time at that location (Zha et al., 2020).
+#'
+#' @param grid  grid list from \code{GenGrid()}.
+#' @param TT    transmissivity field \eqn{T} \code{[L^2/T]}, length-\code{n} vector.
+#' @param SS    storage coefficient \eqn{S} [-], length-\code{n} vector or scalar.
+#' @param iobs  flat index of the observation cell.
+#' @param times numeric vector of output times (must include 0 and all relevant
+#'   observation times).
+#' @param lrw   real work array length for \code{ode.2D} (default 1600000).
+#' @return A list with \code{phi} (matrix \code{nt \times n} of adjoint values) and
+#'   \code{times} (the output time vector).
+#' @keywords internal
+adjoint2DTr <- function(grid, TT, SS, iobs, times, lrw = 1600000) {
+
+  require('deSolve')
+
+  # Unit injection at the observation cell.
+  # In diffusion2D the source term is -Qp/(dx*dy*Spm); negative Qp => injection.
+  # Qp = -1 gives an injection rate that integrates to a unit impulse over
+  # the observation cell.
+  qinf <- data.frame(Qp = -1, x = grid$grid$x[iobs], y = grid$grid$y[iobs])
+
+  # Ensure times is long enough for ode.2D
+  if (length(times) < 2) {
+    times <- seq(0, max(times, 1), length.out = 3)
+  }
+
+  res <- Ftransient2dsim(grid = grid, TT = TT, SS = SS,
+                          Qinf = qinf, times = times, lrw = lrw)
+
+  out <- res$out            # nt x (n+1)
+  sim_times <- out[, 1]
+  Phi <- out[, -1, drop = FALSE]  # step response, nt x n
+  nt <- nrow(out)
+  n <- ncol(Phi)
+
+  # Impulse response = time derivative of step response
+  phi <- matrix(0, nt, n)
+
+  if (nt == 1) {
+    phi[1, ] <- 0
+  } else {
+    # Forward difference for all intervals
+    phi[-nt, ] <- (Phi[2:nt, ] - Phi[1:(nt - 1), ]) / diff(sim_times)
+    # Extend the last value
+    phi[nt, ] <- phi[nt - 1, ]
+  }
+
+  list(phi = phi, times = sim_times)
+}
+
+
+#' Compute the Jacobian matrix for 2D transient hydraulic tomography
+#' via the adjoint-state method
+#'
+#' For each pumping test \eqn{j} and each observation \eqn{i} (at time
+#' \eqn{t_{\text{obs}}}), computes the sensitivity of the observed head
+#' to log-transmissivity \eqn{\ln T} using the adjoint-state method of
+#' Zha et al. (2020):
+#' \deqn{\frac{\partial H(\mathbf{x}_o, t)}{\partial \ln T(\mathbf{x}_Y)} =
+#'       T(\mathbf{x}_Y) \int_0^{t}
+#'       \left[\nabla \varphi(\mathbf{x}_Y, t-\tau) \cdot
+#'             \nabla H(\mathbf{x}_Y, \tau)\right] \, d\tau \, \Delta x \Delta y}
+#'
+#' The key efficiency is that the adjoint \eqn{\varphi} for a given observation
+#' location is computed once and shared across all observation times at that
+#' location.
+#'
+#' @param grid  grid list from \code{GenGrid()}.
+#' @param TT    transmissivity field \eqn{T} \code{[L^2/T]}, length-\code{n} vector.
+#' @param SS    storage coefficient \eqn{S} [-] (default \code{1e-4}).
+#' @param qHT   list of pumping test data frames (columns \code{Qp, x, y}).
+#' @param oHT   list of observation data frames (columns \code{data, x, y, time}).
+#' @param times numeric vector of output times for the forward/adjoint ODE solver
+#'   (default \code{seq(0, 100, by = 10)}).  Must cover all observation times.
+#' @param lrw   real work array length (default 1600000).
+#' @return A matrix of dimension \code{nobs x nelem}.
+#' @export
+#' @examples
+#' \dontrun{
+#' set.seed(123)
+#' grid <- GenGrid(c(20,20,0,20,0,20))
+#' TT <- random2d(nsim=1, grid=grid)$Tp
+#' qHT <- list(data.frame(Qp=10, x=10.5, y=10.5))
+#' oHT <- list(data.frame(data=-1, x=5.5, y=5.5, time=50))
+#' J <- jacobian2DTr(grid=grid, TT=TT, SS=1e-4, qHT=qHT, oHT=oHT)
+#' }
+jacobian2DTr <- function(grid,
+                         TT,
+                         SS     = 1e-4,
+                         qHT    = list(data.frame(Qp = 10, x = 20.5, y = 20.5)),
+                         oHT    = list(data.frame(data = -1, x = 11, y = 11,
+                                                  time = 50)),
+                         times  = seq(0, 100, by = 10),
+                         lrw    = 1600000) {
+
+  require('deSolve')
+
+  nHT <- length(qHT)
+  n <- grid$n
+  nx <- grid$nx
+  ny <- grid$ny
+  dx <- grid$dx
+  dy <- grid$dy
+  dV <- dx * dy
+
+  Tp <- if (length(TT) == 1) rep(TT, n) else TT
+  Sp <- if (length(SS) == 1) rep(SS, n) else SS
+
+  if (length(Tp) != n) {
+    stop("length(TT) = ", length(TT), " does not match grid$n = ", n,
+         ". Use TT of length ", n, " (or a scalar).")
+  }
+  if (length(Sp) != n) {
+    stop("length(SS) = ", length(SS), " does not match grid$n = ", n,
+         ". Use SS of length ", n, " (or a scalar).")
+  }
+
+  # ---- Collect observation element indices and counts ----
+  loc_obsHT <- list()
+  nobs_per_test <- integer(nHT)
+  obs_times_HT <- list()
+  for (j in seq_len(nHT)) {
+    oinf <- oHT[[j]]
+    oelemdf <- getOelem(grid = grid, Oinf = oinf)
+    loc_obsHT[[j]] <- oelemdf$nelem
+    nobs_per_test[j] <- nrow(oinf)
+    obs_times_HT[[j]] <- oinf$time
+  }
+  nobs <- sum(nobs_per_test)
+
+  # ---- Ensure times covers all observation times and has enough points ----
+  all_obs_times <- unique(unlist(obs_times_HT))
+  if (length(all_obs_times) == 0) all_obs_times <- 0
+
+  max_time <- max(c(times, all_obs_times))
+  if (max_time <= 0) max_time <- 1
+
+  if (length(times) < 2) {
+    times <- seq(0, max_time, length.out = 51)
+  }
+
+  # Append any missing observation times and sort
+  if (!all(all_obs_times %in% times)) {
+    times <- sort(unique(c(times, all_obs_times)))
+  }
+
+  # Warn if times are not evenly spaced (convolution assumes uniform grid)
+  dt_diff <- diff(times)
+  if (max(dt_diff) - min(dt_diff) > 1e-6 * max(dt_diff)) {
+    warning("Time grid is not uniform; transient adjoint convolution may be inaccurate.")
+  }
+
+  # ---- Pre-allocate Jacobian ----
+  J <- matrix(0, nrow = nobs, ncol = n)
+
+  # ---- Helper: compute cell-centred 2D gradients ----
+  grad2D <- function(v) {
+    mat <- matrix(v, nx, ny)
+    gx <- matrix(0, nx, ny)
+    gy <- matrix(0, nx, ny)
+    if (nx > 1) {
+      gx[2:(nx - 1), ] <- (mat[3:nx, ] - mat[1:(nx - 2), ]) / (2 * dx)
+      gx[1, ]  <- (mat[2, ] - mat[1, ]) / dx
+      gx[nx, ] <- (mat[nx, ] - mat[nx - 1, ]) / dx
+    }
+    if (ny > 1) {
+      gy[, 2:(ny - 1)] <- (mat[, 3:ny] - mat[, 1:(ny - 2)]) / (2 * dy)
+      gy[, 1]  <- (mat[, 2] - mat[, 1]) / dy
+      gy[, ny] <- (mat[, ny] - mat[, ny - 1]) / dy
+    }
+    list(x = as.vector(gx), y = as.vector(gy))
+  }
+
+  # ---- Forward simulations for each pumping test ----
+  fwd_cache <- list()
+  for (j in seq_len(nHT)) {
+    res_fwd <- Ftransient2dsim(grid = grid, TT = Tp, SS = Sp,
+                                Qinf = qHT[[j]], times = times, lrw = lrw)
+    out_fwd <- res_fwd$out
+    sim_times <- out_fwd[, 1]
+    h_mat <- out_fwd[, -1, drop = FALSE]  # nt x n
+
+    nt <- nrow(h_mat)
+    grad_h_x <- matrix(0, nt, n)
+    grad_h_y <- matrix(0, nt, n)
+    for (it in seq_len(nt)) {
+      g <- grad2D(h_mat[it, ])
+      grad_h_x[it, ] <- g$x
+      grad_h_y[it, ] <- g$y
+    }
+
+    fwd_cache[[j]] <- list(
+      times = sim_times, h = h_mat,
+      grad_x = grad_h_x, grad_y = grad_h_y
+    )
+  }
+
+  # ---- Adjoint (Green's function) for each unique observation location ----
+  all_obs_locs <- unique(unlist(loc_obsHT))
+  adj_cache <- list()
+  for (iobs in all_obs_locs) {
+    adj_res <- adjoint2DTr(grid = grid, TT = Tp, SS = Sp,
+                            iobs = iobs, times = times, lrw = lrw)
+    phi <- adj_res$phi
+    sim_times <- adj_res$times
+
+    nt <- nrow(phi)
+    grad_phi_x <- matrix(0, nt, n)
+    grad_phi_y <- matrix(0, nt, n)
+    for (it in seq_len(nt)) {
+      g <- grad2D(phi[it, ])
+      grad_phi_x[it, ] <- g$x
+      grad_phi_y[it, ] <- g$y
+    }
+
+    adj_cache[[as.character(iobs)]] <- list(
+      times = sim_times,
+      grad_x = grad_phi_x, grad_y = grad_phi_y
+    )
+  }
+
+  # ---- Compute sensitivity by time convolution ----
+  row_offset <- 0
+  for (j in seq_len(nHT)) {
+    obs_elem <- loc_obsHT[[j]]
+    obs_t <- obs_times_HT[[j]]
+    nlocal <- length(obs_elem)
+
+    fwd <- fwd_cache[[j]]
+    fwd_times <- fwd$times
+    nt <- length(fwd_times)
+
+    for (i_local in seq_len(nlocal)) {
+      iobs <- obs_elem[i_local]
+      tobs_i <- obs_t[i_local]
+      global_row <- row_offset + i_local
+
+      adj <- adj_cache[[as.character(iobs)]]
+
+      # Find observation index in the time grid
+      k_obs <- which.min(abs(fwd_times - tobs_i))
+      if (abs(fwd_times[k_obs] - tobs_i) > 1e-6) {
+        warning("Observation time ", tobs_i, " not found in time grid; using nearest.")
+      }
+
+      # Convolution: J = T * dV * integral_0^tobs grad_h(tau) . grad_phi(tobs-tau) dtau
+      S_int <- rep(0, n)
+
+      for (jt in seq_len(k_obs)) {
+        # Index of adjoint at time tobs - tau = times[k_obs - jt + 1]
+        k_adj <- k_obs - jt + 1
+        if (k_adj < 1 || k_adj > nt) next
+
+        # Trapezoidal weight
+        if (k_obs == 1) {
+          dt <- 0
+        } else if (jt == 1) {
+          dt <- (fwd_times[2] - fwd_times[1]) / 2
+        } else if (jt == k_obs) {
+          dt <- (fwd_times[k_obs] - fwd_times[k_obs - 1]) / 2
+        } else {
+          dt <- (fwd_times[jt + 1] - fwd_times[jt - 1]) / 2
+        }
+
+        integrand <- fwd$grad_x[jt, ] * adj$grad_x[k_adj, ] +
+                     fwd$grad_y[jt, ] * adj$grad_y[k_adj, ]
+
+        S_int <- S_int + integrand * dt
+      }
+
+      J[global_row, ] <- -Tp * S_int * dV
+    }
+
+    row_offset <- row_offset + nlocal
+  }
+
+  return(J)
+}
+
+
+
+#' 2D Transient adjoint-based deterministic inversion for hydraulic tomography
+#'
+#' Transient counterpart of \code{\link{FinverseAdj}}.  Performs deterministic
+#' Bayesian inversion to estimate the 2D log-transmissivity field
+#' \eqn{\ln T(\mathbf{x})} from transient hydraulic tomography (HT) data using
+#' the **adjoint-state method** to compute the Jacobian (sensitivity) matrix
+#' analytically via \code{\link{jacobian2DTr}}.
+#'
+#' The update follows the same quasi-linear Bayesian formulation as
+#' \code{\link{FinverseAdj}}, with forward simulations handled by
+#' \code{\link{Ftransient2dsim}} and observations sampled via
+#' \code{\link{samDataTr}}.
+#'
+#' @param domain   a 6-element vector \code{c(nx, ny, x1, x2, y1, y2)} \code{[L]}.
+#' @param grid     grid list from \code{GenGrid()}; generated from \code{domain}
+#'   if \code{NULL}.
+#' @param qHT      list of pumping test data frames (columns \code{Qp, x, y}).
+#' @param itermax  maximum number of iterations (default 5).
+#' @param rmsemin  minimum RMSE stopping criterion (default 0).
+#' @param oHT      list of observation data frames (columns \code{data, x, y, time}).
+#' @param SS       storage coefficient \eqn{S} [-] — scalar or length-\code{n}
+#'   vector (default \code{1e-4}).
+#' @param times    numeric vector of output times for the ODE solver (default
+#'   \code{seq(0, 100, by = 10)}).
+#' @param lrw      real work array length for \code{ode.2D} (default 1600000).
+#' @param sigma2obs observation error variance (default 1e-4).
+#' @param lambda_lm Levenberg-Marquardt damping parameter (default 1.0); decays
+#'   by \code{decay_lm} each iteration.
+#' @param decay_lm  decay factor for \code{lambda_lm} (default 2.0).
+#' @param geo      prior geostatistical parameters:
+#'   \code{list(me, var, geomod, anis, range, nugget)}.
+#' @param m0       initial log-T field, length \code{n} vector.  If \code{NULL}
+#'   (default), uses the prior mean \code{geo$me} everywhere.
+#' @param ifcor    logical; if \code{TRUE}, returns the Jacobian matrix and
+#'   forward response after the first iteration without performing the update.
+#' @param ifvarTh  logical; if \code{TRUE}, computes and stores \code{varobsh}
+#'   and \code{varT}.  Default \code{FALSE}.
+#' @return A list of per-iteration results (same structure as \code{\link{FinverseAdj}}).
+#' @export
+#' @examples
+#' \dontrun{
+#' set.seed(100)
+#' trueK <- random2d(nsim=1)
+#' TT <- trueK$Tp
+#' grid <- GenGrid(c(40,40,0,40,0,40))
+#' Qinf1 <- data.frame(Qp=10, x=20.5, y=20.5)
+#' qHT <- list(test1 = Qinf1)
+#' loc <- expand.grid(x=c(15,18,22,25,30), y=c(15,18,22,25,30))
+#' Oinf1 <- data.frame(data=NA, x=loc$x, y=loc$y, time=50)
+#' res_fwd <- Ftransient2dsim(grid=grid, TT=TT, Qinf=Qinf1, times=c(0,50))
+#' Oinf1 <- samDataTr(Oinf=Oinf1, grid=grid, result_tr=res_fwd)
+#' oHT <- list(test1 = Oinf1)
+#' result <- FinverseAdjTr(grid=grid, qHT=qHT, oHT=oHT, itermax=3)
+#' }
+FinverseAdjTr <- function(
+    domain      = c(40, 40, 0, 40, 0, 40),
+    grid        = NULL,
+    qHT         = list(data.frame(Qp = 10, x = 20.5, y = 20.5)),
+    itermax     = 5,
+    rmsemin     = 0,
+    oHT         = list(data.frame(data = -1, x = 11, y = 11, time = 50)),
+    SS          = 1e-4,
+    times       = seq(0, 100, by = 10),
+    lrw         = 1600000,
+    sigma2obs   = 1e-4,
+    lambda_lm   = 1.0,
+    decay_lm    = 2.0,
+    geo         = list(me = 0, var = 1, geomod = "Exp",
+                       anis = c(90, 1), range = 30, nugget = 0),
+    m0          = NULL,
+    ifcor       = FALSE,
+    ifvarTh     = FALSE) {
+
+  set.seed(200)
+  startTime <- Sys.time()
+
+  if (is.null(grid)) grid <- GenGrid(domain)
+
+  n <- grid$n
+  nHT <- length(qHT)
+
+  # ---- Extract observation data ----
+  trueobshHT <- list()
+  loc_obsHT  <- list()
+  for (i in seq_len(nHT)) {
+    oinf <- oHT[[i]]
+    oelemdf <- getOelem(grid = grid, Oinf = oinf)
+    loc_obsHT[[i]] <- oelemdf$nelem
+    trueobshHT[[i]] <- oinf$data
+  }
+  trueobsh <- unlist(trueobshHT)
+  nobs <- length(trueobsh)
+
+  # ---- Ensure times covers all observation times ----
+  all_obs_times <- unique(unlist(lapply(oHT, function(x) x$time)))
+  if (!all(all_obs_times %in% times)) {
+    times <- sort(unique(c(times, all_obs_times)))
+    message("times extended to cover all observation times: ",
+            paste(times, collapse = ", "))
+  }
+
+  # ---- Build prior covariance C_kk from geostatistical model ----
+  require('gstat')
+  xy <- grid$grid
+
+  dist_mat <- as.matrix(dist(xy))
+  if (geo$geomod == "Exp") {
+    C_kk <- geo$var * exp(-dist_mat / geo$range)
+    diag(C_kk) <- geo$var + geo$nugget
+  } else if (geo$geomod == "Gau") {
+    C_kk <- geo$var * exp(-(dist_mat / geo$range)^2)
+    diag(C_kk) <- geo$var + geo$nugget
+  } else if (geo$geomod == "Sph") {
+    hr <- dist_mat / geo$range
+    C_kk <- geo$var * (1 - 1.5 * hr + 0.5 * hr^3)
+    C_kk[hr > 1] <- 0
+    diag(C_kk) <- geo$var + geo$nugget
+  } else {
+    C_kk <- geo$var * exp(-dist_mat / geo$range)
+    diag(C_kk) <- geo$var + geo$nugget
+  }
+
+  # ---- Initial parameter estimate ----
+  if (is.null(m0)) {
+    m <- rep(geo$me, n)  # log-T
+  } else {
+    m <- m0
+  }
+  T_current <- exp(m)
+
+  # ---- Iteration loop ----
+  niter <- 1
+  rmse <- 1e10
+  iterdf <- list()
+
+  while (niter <= itermax && rmse > rmsemin) {
+
+    # --- Forward simulation at current T ---
+    h_sim_vec <- samHTtr(grid = grid, TT = T_current, SS = SS,
+                         qHT = qHT, oHT = oHT, times = times, lrw = lrw)
+
+    # --- Misfit ---
+    residual <- trueobsh - h_sim_vec
+    rmse <- sqrt(mean(residual^2))
+    l2 <- rmse
+    l1 <- mean(abs(residual))
+
+    msg <- paste('niter =', niter,
+                 'rmse =', round(rmse, 6),
+                 'l2 =', round(l2, 6),
+                 'l1 =', round(l1, 6),
+                 'lambda_lm =', round(lambda_lm, 4))
+    print(msg)
+
+    # --- Compute Jacobian ---
+    J <- jacobian2DTr(grid = grid, TT = T_current, SS = SS,
+                      qHT = qHT, oHT = oHT, times = times, lrw = lrw)
+
+    if (ifcor) {
+      print("ifcor = TRUE: returning Jacobian and simulated heads without update.")
+      return(list(J = J, h_sim = h_sim_vec))
+    }
+
+    # --- Compute update (dual / observation-space formulation) ---
+    Jt <- t(J)
+    JCJt <- J %*% C_kk %*% Jt
+    S_mat <- JCJt + (sigma2obs + lambda_lm) * diag(nobs)
+
+    beta <- solve(S_mat, residual)
+    dm <- as.vector(C_kk %*% Jt %*% beta)
+
+    # --- Estimate variances ---
+    meanobsh <- h_sim_vec
+
+    if (ifvarTh) {
+      KS <- C_kk %*% Jt %*% solve(S_mat)
+      C_post <- C_kk - KS %*% J %*% C_kk
+      varT <- as.vector(diag(C_post))
+      JCJt_post <- J %*% C_post %*% Jt
+      varobsh <- as.vector(diag(JCJt_post))
+    } else {
+      varT <- NULL
+      varobsh <- NULL
+    }
+
+    # --- Update parameters ---
+    m <- m + dm
+    T_current <- exp(m)
+
+    # --- Store iteration results ---
+    iterdf[[niter]] <- list(
+      meanT    = as.vector(m),
+      varT     = varT,
+      meanobsh = meanobsh,
+      varobsh  = varobsh,
+      m        = m,
+      h_sim    = h_sim_vec,
+      rmse     = rmse,
+      l2       = l2,
+      l1       = l1
+    )
+
+    if (niter == 1) {
+      iterdf[[niter]]$J <- J
+      print("--- time for one iteration ---")
+      print(difftime(Sys.time(), startTime))
+    }
+
+    niter <- niter + 1
+    lambda_lm <- lambda_lm / decay_lm
+  }
+
+  print("--- total time ---")
+  print(difftime(Sys.time(), startTime))
+  return(iterdf)
+}
+
+# ==============================================================================
+# 3D Adjoint-based Deterministic Inversion
+# ==============================================================================
+
+#' 3D Adjoint-based deterministic inversion for hydraulic tomography
+#'
+#' 3D counterpart of \code{\link{FinverseAdj}}.  Performs deterministic Bayesian
+#' inversion to estimate the 3D log-hydraulic-conductivity field
+#' \eqn{\ln K(\mathbf{x})} from hydraulic tomography (HT) data using the
+#' **adjoint-state method** to compute the Jacobian (sensitivity) matrix
+#' analytically via \code{\link{jacobian3D}}.
+#'
+#' The update follows the same quasi-linear Bayesian formulation as
+#' \code{\link{FinverseAdj}}, replacing the 2D transmissivity with 3D hydraulic
+#' conductivity.  A Levenberg-Marquardt damping parameter \code{lambda_lm}
+#' is added to the diagonal of the Hessian approximation for stability.
+#'
+#' @param domain   9-element vector \code{c(nx, ny, nz, x1, x2, y1, y2, z1, z2)}.
+#' @param grid     grid list from \code{GenGrid3D()}; generated from \code{domain}
+#'   if \code{NULL}.
+#' @param qHT      list of pumping test data frames (columns \code{Qp, x, y, z}).
+#' @param itermax  maximum number of iterations (default 5).
+#' @param rmsemin  minimum RMSE stopping criterion (default 0).
+#' @param oHT      list of observation data frames (columns \code{data, x, y, z}).
+#' @param lrw      real work array length for \code{steady.3D} (default 20000000).
+#' @param sigma2obs observation error variance (default 1e-4).
+#' @param lambda_lm Levenberg-Marquardt damping parameter (default 1.0); decays
+#'   by \code{decay_lm} each iteration.
+#' @param decay_lm  decay factor for \code{lambda_lm} (default 2.0).
+#' @param geo      prior geostatistical parameters:
+#'   \code{list(me, var, geomod, range, nugget, anis)}.
+#'   Note \code{anis} is a 5-element vector for 3D.
+#' @param m0       initial log-K field, length \code{n} vector.  If \code{NULL}
+#'   (default), uses the prior mean \code{geo$me} everywhere.
+#' @param ifcor    logical; if \code{TRUE}, returns the Jacobian matrix and
+#'   forward response after the first iteration without performing the update.
+#' @param ifvarTh  logical; if \code{TRUE}, computes and stores the predicted
+#'   head variance \code{varobsh} and the conditional (posterior) variance of
+#'   log-K \code{varT} at each iteration.  Default \code{FALSE} because the
+#'   covariance matrix operation can be expensive for large grids.
+#' @return A list of per-iteration results, each a list with
+#'   \code{meanT} (log-K estimate, same as \code{m}), \code{varT}
+#'   (conditional variance of log-K, only when \code{ifvarTh = TRUE}),
+#'   \code{meanobsh} (simulated heads), \code{varobsh} (predicted head variance,
+#'   only when \code{ifvarTh = TRUE}),
+#'   \code{m}, \code{h_sim}, \code{rmse}, \code{l2}, \code{l1}, and
+#'   \code{J} (Jacobian, first iteration only).  When \code{ifcor = TRUE},
+#'   returns \code{list(J = J, h_sim = h_sim)}.
+#' @export
+#' @examples
+#' \dontrun{
+#' domain3d <- c(15, 15, 5, 0, 15, 0, 15, 0, 5)
+#' grid3d   <- GenGrid3D(domain3d)
+#' set.seed(42)
+#' trueK3d  <- random3d(nsim=1, grid=grid3d)
+#' Qinf3d   <- data.frame(Qp=10, x=7.5, y=7.5, z=2.5)
+#' qHT3d    <- list(test1 = Qinf3d)
+#' trueh3d  <- Fsteady3dsim(grid=grid3d, KK=trueK3d$Kp, Qinf=Qinf3d)
+#' loc      <- expand.grid(x=c(3,6,9,12), y=c(3,6,9,12))
+#' Oinf3d   <- data.frame(data=NA, x=loc$x, y=loc$y, z=2.5)
+#' Oinf3d   <- samData3D(Oinf=Oinf3d, grid=grid3d, h=trueh3d$solution)
+#' oHT3d    <- list(test1 = Oinf3d)
+#' result   <- Finverse3DAdj(grid=grid3d, qHT=qHT3d, oHT=oHT3d, itermax=3)
+#' }
+Finverse3DAdj <- function(
+    domain      = c(15, 15, 5, 0, 15, 0, 15, 0, 5),
+    grid        = NULL,
+    qHT         = list(data.frame(Qp = 10, x = 7.5, y = 7.5, z = 2.5)),
+    itermax     = 5,
+    rmsemin     = 0,
+    oHT         = list(data.frame(data = -1, x = 5, y = 5, z = 2.5)),
+    lrw         = 20000000,
+    sigma2obs   = 1e-4,
+    lambda_lm   = 1.0,
+    decay_lm    = 2.0,
+    geo         = list(me = 0, var = 1, geomod = "Exp",
+                       range = 10, nugget = 0,
+                       anis = c(0, 0, 0, 1, 1)),
+    m0          = NULL,
+    ifcor       = FALSE,
+    ifvarTh     = FALSE) {
+
+  set.seed(200)
+  startTime <- Sys.time()
+
+  if (is.null(grid)) grid <- GenGrid3D(domain)
+
+  n <- grid$n
+  nHT <- length(qHT)
+
+  # ---- Extract observation data ----
+  trueobshHT <- list()
+  loc_obsHT  <- list()
+  for (i in seq_len(nHT)) {
+    oinf <- oHT[[i]]
+    oelemdf <- getOelem3D(grid = grid, Oinf = oinf)
+    loc_obsHT[[i]] <- oelemdf$nelem
+    trueobshHT[[i]] <- oinf$data
+  }
+  trueobsh <- unlist(trueobshHT)
+  nobs <- length(trueobsh)
+
+  # ---- Build prior covariance C_kk from geostatistical model (3D) ----
+  require('gstat')
+  xyz <- grid$grid
+
+  dist_mat <- as.matrix(dist(xyz))
+  if (geo$geomod == "Exp") {
+    C_kk <- geo$var * exp(-dist_mat / geo$range)
+    diag(C_kk) <- geo$var + geo$nugget
+  } else if (geo$geomod == "Gau") {
+    C_kk <- geo$var * exp(-(dist_mat / geo$range)^2)
+    diag(C_kk) <- geo$var + geo$nugget
+  } else if (geo$geomod == "Sph") {
+    hr <- dist_mat / geo$range
+    C_kk <- geo$var * (1 - 1.5 * hr + 0.5 * hr^3)
+    C_kk[hr > 1] <- 0
+    diag(C_kk) <- geo$var + geo$nugget
+  } else {
+    C_kk <- geo$var * exp(-dist_mat / geo$range)
+    diag(C_kk) <- geo$var + geo$nugget
+  }
+
+  # ---- Initial parameter estimate ----
+  if (is.null(m0)) {
+    m <- rep(geo$me, n)  # log-K
+  } else {
+    m <- m0
+  }
+  K_current <- exp(m)
+
+  # ---- Iteration loop ----
+  niter <- 1
+  rmse <- 1e10
+  iterdf <- list()
+
+  while (niter <= itermax && rmse > rmsemin) {
+
+    # --- Forward simulation at current K ---
+    h_sim_vec <- samHT3D(grid = grid, TT = K_current,
+                         qHT = qHT, oHT = oHT, lrw = lrw)
+
+    # --- Misfit ---
+    residual <- trueobsh - h_sim_vec
+    rmse <- sqrt(mean(residual^2))
+    l2 <- rmse
+    l1 <- mean(abs(residual))
+
+    msg <- paste('niter =', niter,
+                 'rmse =', round(rmse, 6),
+                 'l2 =', round(l2, 6),
+                 'l1 =', round(l1, 6),
+                 'lambda_lm =', round(lambda_lm, 4))
+    print(msg)
+
+    # --- Compute Jacobian ---
+    J <- jacobian3D(grid = grid, KK = K_current,
+                    qHT = qHT, oHT = oHT, lrw = lrw)
+
+    if (ifcor) {
+      print("ifcor = TRUE: returning Jacobian and simulated heads without update.")
+      return(list(J = J, h_sim = h_sim_vec))
+    }
+
+    # --- Compute update (dual / observation-space formulation) ---
+    Jt <- t(J)                                     # nelem x nobs
+    JCJt <- J %*% C_kk %*% Jt                      # nobs x nobs
+    S <- JCJt + (sigma2obs + lambda_lm) * diag(nobs)
+
+    beta <- solve(S, residual)                     # nobs
+    dm <- as.vector(C_kk %*% Jt %*% beta)          # nelem
+
+    # --- Estimate variances ---
+    meanobsh <- h_sim_vec
+
+    if (ifvarTh) {
+      # Predicted head variance = diag(J C_kk J^T)
+      varobsh <- as.vector(diag(JCJt))
+
+      # Conditional (posterior) parameter covariance
+      KS <- C_kk %*% Jt %*% solve(S)               # nelem x nobs
+      C_post <- C_kk - KS %*% J %*% C_kk           # nelem x nelem
+      varT <- as.vector(diag(C_post))
+    } else {
+      varT <- NULL
+      varobsh <- NULL
+    }
+
+    # --- Update parameters ---
+    m <- m + dm
+    K_current <- exp(m)
+
+    # --- Store iteration results ---
+    iterdf[[niter]] <- list(
+      meanT    = as.vector(m),
+      varT     = varT,
+      meanobsh = meanobsh,
+      varobsh  = varobsh,
+      m        = m,
+      h_sim    = h_sim_vec,
+      rmse     = rmse,
+      l2       = l2,
+      l1       = l1
+    )
+
+    if (niter == 1) {
+      iterdf[[niter]]$J <- J
+      print("--- time for one iteration ---")
+      print(difftime(Sys.time(), startTime))
+    }
+
+    niter <- niter + 1
+    lambda_lm <- lambda_lm / decay_lm
+  }
+
+  print("--- total time ---")
+  print(difftime(Sys.time(), startTime))
+  return(iterdf)
+}
+
+
+#' 3D Adjoint-based deterministic inversion — well-screen version
+#'
+#' 3D counterpart of \code{\link{FinverseAdj}} for well-screen (vertical
+#' interval) observations.  Uses \code{\link{jacobian3DScreen}} to compute
+#' the Jacobian for interval-averaged head observations, where each
+#' observation well has a screen defined by \code{z_top} and \code{z_bottom}.
+#'
+#' The inversion algorithm is otherwise identical to \code{\link{Finverse3DAdj}}.
+#'
+#' @param domain   9-element vector \code{c(nx, ny, nz, x1, x2, y1, y2, z1, z2)}.
+#' @param grid     grid list from \code{GenGrid3D()}; generated from \code{domain}
+#'   if \code{NULL}.
+#' @param qHT      list of pumping test data frames with columns
+#'   \code{Qp, x, y, z_top, z_bottom} (well-screen pumping) or
+#'   \code{Qp, x, y, z} (point pumping).
+#' @param itermax  maximum number of iterations (default 5).
+#' @param rmsemin  minimum RMSE stopping criterion (default 0).
+#' @param oHT      list of observation data frames with columns
+#'   \code{data, x, y, z_top, z_bottom}.
+#' @param lrw      real work array length for \code{steady.3D} (default 20000000).
+#' @param sigma2obs observation error variance (default 1e-4).
+#' @param lambda_lm Levenberg-Marquardt damping parameter (default 1.0); decays
+#'   by \code{decay_lm} each iteration.
+#' @param decay_lm  decay factor for \code{lambda_lm} (default 2.0).
+#' @param geo      prior geostatistical parameters:
+#'   \code{list(me, var, geomod, range, nugget, anis)}.
+#' @param m0       initial log-K field, length \code{n} vector.  If \code{NULL}
+#'   (default), uses the prior mean \code{geo$me} everywhere.
+#' @param ifcor    logical; if \code{TRUE}, returns the Jacobian matrix and
+#'   forward response after the first iteration without performing the update.
+#' @param ifvarTh  logical; if \code{TRUE}, computes and stores the predicted
+#'   head variance \code{varobsh} and the conditional (posterior) variance of
+#'   log-K \code{varT} at each iteration.  Default \code{FALSE}.
+#' @return A list of per-iteration results, each a list with
+#'   \code{meanT}, \code{varT}, \code{meanobsh}, \code{varobsh},
+#'   \code{m}, \code{h_sim}, \code{rmse}, \code{l2}, \code{l1}, and
+#'   \code{J} (Jacobian, first iteration only).  When \code{ifcor = TRUE},
+#'   returns \code{list(J = J, h_sim = h_sim)}.
+#' @export
+#' @examples
+#' \dontrun{
+#' domain3d <- c(15, 15, 5, 0, 15, 0, 15, 0, 5)
+#' grid3d   <- GenGrid3D(domain3d)
+#' set.seed(42)
+#' trueK3d  <- random3d(nsim=1, grid=grid3d)
+#' Qinf3d   <- data.frame(Qp=10, x=7.5, y=7.5, z_top=2, z_bottom=3)
+#' qHT3d    <- list(test1 = Qinf3d)
+#' res3d    <- Fsteady3dsim(grid=grid3d, KK=trueK3d$Kp, Qinf=Qinf3d)
+#' loc      <- expand.grid(x=c(3,6,9,12), y=c(3,6,9,12))
+#' Oinf3d   <- data.frame(data=NA, x=loc$x, y=loc$y,
+#'                        z_top=1, z_bottom=4)
+#' Oinf3d   <- samData3DScreen(Oinf=Oinf3d, grid=grid3d, h=res3d$solution)
+#' oHT3d    <- list(test1 = Oinf3d)
+#' result   <- Finverse3DScreenAdj(grid=grid3d, qHT=qHT3d, oHT=oHT3d, itermax=3)
+#' }
+Finverse3DScreenAdj <- function(
+    domain      = c(15, 15, 5, 0, 15, 0, 15, 0, 5),
+    grid        = NULL,
+    qHT         = list(data.frame(Qp = 10, x = 7.5, y = 7.5,
+                                  z_top = 2, z_bottom = 3)),
+    itermax     = 5,
+    rmsemin     = 0,
+    oHT         = list(data.frame(data = -1, x = 5, y = 5,
+                                  z_top = 1, z_bottom = 4)),
+    lrw         = 20000000,
+    sigma2obs   = 1e-4,
+    lambda_lm   = 1.0,
+    decay_lm    = 2.0,
+    geo         = list(me = 0, var = 1, geomod = "Exp",
+                       range = 10, nugget = 0,
+                       anis = c(0, 0, 0, 1, 1)),
+    m0          = NULL,
+    ifcor       = FALSE,
+    ifvarTh     = FALSE) {
+
+  set.seed(200)
+  startTime <- Sys.time()
+
+  if (is.null(grid)) grid <- GenGrid3D(domain)
+
+  n <- grid$n
+  nHT <- length(qHT)
+
+  # ---- Extract observation data ----
+  trueobshHT <- list()
+  for (i in seq_len(nHT)) {
+    oinf <- oHT[[i]]
+    trueobshHT[[i]] <- oinf$data
+  }
+  trueobsh <- unlist(trueobshHT)
+  nobs <- length(trueobsh)
+
+  # ---- Build prior covariance C_kk from geostatistical model (3D) ----
+  require('gstat')
+  xyz <- grid$grid
+
+  dist_mat <- as.matrix(dist(xyz))
+  if (geo$geomod == "Exp") {
+    C_kk <- geo$var * exp(-dist_mat / geo$range)
+    diag(C_kk) <- geo$var + geo$nugget
+  } else if (geo$geomod == "Gau") {
+    C_kk <- geo$var * exp(-(dist_mat / geo$range)^2)
+    diag(C_kk) <- geo$var + geo$nugget
+  } else if (geo$geomod == "Sph") {
+    hr <- dist_mat / geo$range
+    C_kk <- geo$var * (1 - 1.5 * hr + 0.5 * hr^3)
+    C_kk[hr > 1] <- 0
+    diag(C_kk) <- geo$var + geo$nugget
+  } else {
+    C_kk <- geo$var * exp(-dist_mat / geo$range)
+    diag(C_kk) <- geo$var + geo$nugget
+  }
+
+  # ---- Initial parameter estimate ----
+  if (is.null(m0)) {
+    m <- rep(geo$me, n)  # log-K
+  } else {
+    m <- m0
+  }
+  K_current <- exp(m)
+
+  # ---- Iteration loop ----
+  niter <- 1
+  rmse <- 1e10
+  iterdf <- list()
+
+  while (niter <= itermax && rmse > rmsemin) {
+
+    # --- Forward simulation at current K (screen-averaged) ---
+    h_sim_vec <- samHT3DScreen(grid = grid, TT = K_current,
+                               qHT = qHT, oHT = oHT, lrw = lrw)
+
+    # --- Misfit ---
+    residual <- trueobsh - h_sim_vec
+    rmse <- sqrt(mean(residual^2))
+    l2 <- rmse
+    l1 <- mean(abs(residual))
+
+    msg <- paste('niter =', niter,
+                 'rmse =', round(rmse, 6),
+                 'l2 =', round(l2, 6),
+                 'l1 =', round(l1, 6),
+                 'lambda_lm =', round(lambda_lm, 4))
+    print(msg)
+
+    # --- Compute Jacobian (screen-averaged) ---
+    J <- jacobian3DScreen(grid = grid, KK = K_current,
+                          qHT = qHT, oHT = oHT, lrw = lrw)
+
+    if (ifcor) {
+      print("ifcor = TRUE: returning Jacobian and simulated heads without update.")
+      return(list(J = J, h_sim = h_sim_vec))
+    }
+
+    # --- Compute update (dual / observation-space formulation) ---
+    Jt <- t(J)                                     # nelem x nobs
+    JCJt <- J %*% C_kk %*% Jt                      # nobs x nobs
+    S <- JCJt + (sigma2obs + lambda_lm) * diag(nobs)
+
+    beta <- solve(S, residual)                     # nobs
+    dm <- as.vector(C_kk %*% Jt %*% beta)          # nelem
+
+    # --- Estimate variances ---
+    meanobsh <- h_sim_vec
+
+    if (ifvarTh) {
+      varobsh <- as.vector(diag(JCJt))
+
+      KS <- C_kk %*% Jt %*% solve(S)
+      C_post <- C_kk - KS %*% J %*% C_kk
+      varT <- as.vector(diag(C_post))
+    } else {
+      varT <- NULL
+      varobsh <- NULL
+    }
+
+    # --- Update parameters ---
+    m <- m + dm
+    K_current <- exp(m)
+
+    # --- Store iteration results ---
     iterdf[[niter]] <- list(
       meanT    = as.vector(m),
       varT     = varT,

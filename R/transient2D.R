@@ -102,6 +102,16 @@ Ftransient2dsim <- function(domain = c(40, 40, 0, 40, 0, 40),
 
   Tp <- if (length(TT) == 1L) rep(TT, n) else TT
   Sp <- if (length(SS) == 1L) rep(SS, n) else SS
+
+  if (length(Tp) != n) {
+    stop("length(TT) = ", length(TT), " does not match grid$n = ", n,
+         ". Use TT of length ", n, " (or a scalar).")
+  }
+  if (length(Sp) != n) {
+    stop("length(SS) = ", length(SS), " does not match grid$n = ", n,
+         ". Use SS of length ", n, " (or a scalar).")
+  }
+
   Tpm <- matrix(Tp, nx, ny)
   Spm <- matrix(Sp, nx, ny)
   if (is.null(h0)) h0 <- rep(0, n)
@@ -112,12 +122,17 @@ Ftransient2dsim <- function(domain = c(40, 40, 0, 40, 0, 40),
   para <- list(dx = dx, dy = dy, nx = nx, ny = ny,
                Tpm = Tpm, Spm = Spm, Qp = Qp, Nxp = Nxp, Nyp = Nyp)
 
+  if (length(times) < 2) {
+    times <- seq(0, max(times, 1), length.out = 3)
+  }
+
   out <- ode.2D(y      = h0,
                 times  = times,
                 func   = diffusion2D,
                 parms  = para,
                 dimens = c(nx, ny),
-                lrw    = lrw)
+                lrw    = lrw,
+                hmax   = max(diff(times)))
 
   list(out   = unclass(out),   # plain matrix; drop deSolve class for easier indexing
        grid  = grid,
