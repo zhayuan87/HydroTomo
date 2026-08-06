@@ -12,7 +12,10 @@ FinverseAdjTr(
   rmsemin = 0,
   oHT = list(data.frame(data = -1, x = 11, y = 11, time = 50)),
   SS = 1e-04,
-  times = seq(0, 100, by = 10),
+  times = NULL,
+  npoints = 151,
+  p_grid = 1.03,
+  nconv = 201,
   lrw = 1600000,
   sigma2obs = 1e-04,
   lambda_lm = 1,
@@ -40,8 +43,14 @@ if \code{NULL}.}
 \item{SS}{storage coefficient \eqn{S} \link{-} — scalar or length-\code{n}
 vector (default \code{1e-4}).}
 
-\item{times}{numeric vector of output times for the ODE solver (default
-\code{seq(0, 100, by = 10)}).}
+\item{times}{numeric vector of output times for the ODE solver.
+If \code{NULL} (default), a geometric grid is auto-generated.}
+
+\item{npoints}{number of time points for auto-generated grids (default 151).}
+
+\item{p_grid}{growth factor for auto-generated time grids (default 1.03).}
+
+\item{nconv}{number of points on the common convolution grid (default 201).}
 
 \item{lrw}{real work array length for \code{ode.2D} (default 1600000).}
 

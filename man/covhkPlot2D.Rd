@@ -8,9 +8,6 @@ covhkPlot2D(
   covhk,
   grid,
   iobs = 1L,
-  qHT = NULL,
-  oHT = NULL,
-  labels = NULL,
   palette = "viridis",
   title = NULL,
   zlab = "Cov(h, lnT)",
@@ -29,17 +26,6 @@ returned by a \code{Finverse*} function with \code{ifcor = TRUE}.}
 
 \item{iobs}{integer; which observation row of \code{covhk} to plot
 (1-based index into the concatenated observation vector).}
-
-\item{qHT}{list of pumping-test data frames (columns \code{Qp, x, y}),
-used to overlay well locations and auto-label.}
-
-\item{oHT}{list of observation data frames (columns \code{data, x, y}),
-used to overlay well locations and auto-label.}
-
-\item{labels}{optional character vector of custom labels for observations.
-If \code{NULL} (default), labels are auto-generated as \code{"P1 (x,y)"},
-\code{"P2 (x,y)"}, … for pumping wells and \code{"O (x,y)"} for
-observation wells.}
 
 \item{palette}{\code{viridis} palette option (default \code{"viridis"}).}
 
@@ -60,12 +46,12 @@ A \code{ggplot} object.
 Given a \code{covhk} matrix returned by any parallel 2D inversion function
 (e.g. \code{Finverse3}, \code{Finverse3Tr}) with \code{ifcor = TRUE}, this
 function plots the cross-covariance between one selected observation's head
-and the log-transmissivity at every grid cell.  Pumping-well and
-observation-well locations are overlaid.
+and the log-transmissivity at every grid cell.  Use \code{+ geom_point()} /
+\code{geom_text()} externally to overlay well locations.
 }
 \examples{
 \dontrun{
 covhk <- Finverse3(grid = grid, qHT = qHT, oHT = oHT, ifcor = TRUE)
-covhkPlot2D(covhk, grid, iobs = 1, qHT = qHT, oHT = oHT)
+covhkPlot2D(covhk, grid, iobs = 1)
 }
 }

@@ -9,9 +9,6 @@ covhkPlot3D(
   grid,
   iobs = 1L,
   zslice = NULL,
-  qHT = NULL,
-  oHT = NULL,
-  labels = NULL,
   palette = "viridis",
   title = NULL,
   zlab = "Cov(h, lnK)",
@@ -31,14 +28,6 @@ covhkPlot3D(
 
 \item{zslice}{z coordinate \code{[L]} of the horizontal slice to display.
 Default: middle layer of the grid.}
-
-\item{qHT}{list of pumping-test data frames (columns
-\code{Qp, x, y, z} or \code{Qp, x, y, z_top, z_bottom}).}
-
-\item{oHT}{list of observation data frames (columns
-\code{data, x, y, z} or \code{data, x, y, z_top, z_bottom}).}
-
-\item{labels}{optional custom labels.  Auto-generated if \code{NULL}.}
 
 \item{palette}{\code{viridis} palette option.}
 
@@ -60,12 +49,12 @@ A \code{ggplot} object.
 from \code{Finverse3D}, \code{Finverse3DTr}, or \code{Finverse3DTrScreen}
 (all with \code{ifcor = TRUE}), this function plots a horizontal z-slice of
 the cross-covariance between one observation's head and log-K at every grid
-cell.  Pumping and observation well locations (projected onto the slice) are
-overlaid.
+cell.  Use \code{+ geom_point()} / \code{geom_text()} externally to overlay
+well locations.
 }
 \examples{
 \dontrun{
 covhk <- Finverse3D(grid = grid3d, qHT = qHT, oHT = oHT, ifcor = TRUE)
-covhkPlot3D(covhk, grid3d, iobs = 1, qHT = qHT, oHT = oHT)
+covhkPlot3D(covhk, grid3d, iobs = 1)
 }
 }

@@ -24,9 +24,8 @@ times listed in \code{Oinf}.
 }
 \details{
 If an observation time does not exactly match a row in \code{result_tr},
-the nearest available time step is used.  To get exact values, include all
-observation times in the \code{times} argument of
-\code{\link{Ftransient2dsim}}.
+linear interpolation is used.  For best accuracy, include observation
+times in the \code{times} argument of \code{\link{Ftransient2dsim}}.
 }
 \examples{
 times  <- seq(0, 100, by = 10)

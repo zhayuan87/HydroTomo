@@ -4,7 +4,17 @@
 \alias{adjoint2DTr}
 \title{2D Transient adjoint (Green's function) solver}
 \usage{
-adjoint2DTr(grid, TT, SS, iobs, times, lrw = 1600000)
+adjoint2DTr(
+  grid,
+  TT,
+  SS,
+  iobs,
+  times = NULL,
+  t_max = 100,
+  npoints = 101,
+  p_grid = 1.05,
+  lrw = 1600000
+)
 }
 \arguments{
 \item{grid}{grid list from \code{GenGrid()}.}
@@ -15,8 +25,16 @@ adjoint2DTr(grid, TT, SS, iobs, times, lrw = 1600000)
 
 \item{iobs}{flat index of the observation cell.}
 
-\item{times}{numeric vector of output times (must include 0 and all relevant
-observation times).}
+\item{times}{numeric vector of output times for the ODE solver.
+If \code{NULL} (default), a geometric time grid is generated
+using \code{t_max} and \code{npoints}.}
+
+\item{t_max}{end time of the adjoint simulation.  Only used when
+\code{times = NULL}.  Default: 100.}
+
+\item{npoints}{number of time points for auto-generated grid (default 101).}
+
+\item{p_grid}{growth factor for auto-generated grid (default 1.05).}
 
 \item{lrw}{real work array length for \code{ode.2D} (default 1600000).}
 }
@@ -39,6 +57,11 @@ In practice, the impulse source is replaced by a continuous unit injection
 The impulse response (adjoint) is then obtained by finite-differencing
 \eqn{\Phi} in time:
 \deqn{\varphi(\mathbf{x}, t) \approx \frac{\partial \Phi}{\partial t}}
+
+The time grid for the adjoint is generated independently of observation
+times — it only needs to span from 0 to the end of pumping (\code{t_max}).
+The convolution in \code{jacobian2DTr} handles time alignment via
+interpolation.
 
 For a fixed observation location, the same \eqn{\varphi} time series can be
 reused for every observation time at that location (Zha et al., 2020).

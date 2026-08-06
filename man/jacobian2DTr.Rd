@@ -11,7 +11,11 @@ jacobian2DTr(
   SS = 1e-04,
   qHT = list(data.frame(Qp = 10, x = 20.5, y = 20.5)),
   oHT = list(data.frame(data = -1, x = 11, y = 11, time = 50)),
-  times = seq(0, 100, by = 10),
+  times = NULL,
+  t_max = NULL,
+  npoints = 151,
+  p_grid = 1.03,
+  nconv = 201,
   lrw = 1600000
 )
 }
@@ -26,8 +30,17 @@ jacobian2DTr(
 
 \item{oHT}{list of observation data frames (columns \code{data, x, y, time}).}
 
-\item{times}{numeric vector of output times for the forward/adjoint ODE solver
-(default \code{seq(0, 100, by = 10)}).  Must cover all observation times.}
+\item{times}{numeric vector of output times for the ODE solver.
+If \code{NULL} (default), a geometric grid is auto-generated.}
+
+\item{t_max}{end time of the simulation.  If \code{NULL} (default),
+set to the maximum observation time across all tests.}
+
+\item{npoints}{number of time points in auto-generated grids (default 151).}
+
+\item{p_grid}{growth factor for auto-generated time grids (default 1.03).}
+
+\item{nconv}{number of points on the common convolution grid (default 201).}
 
 \item{lrw}{real work array length (default 1600000).}
 }
@@ -45,6 +58,12 @@ Zha et al. (2020):
             \nabla H(\mathbf{x}_Y, \tau)\right] \, d\tau \, \Delta x \Delta y}
 }
 \details{
+\strong{Time discretisation}: Forward and adjoint simulations use independent
+geometric time grids (fine at start, coarser later).  The convolution
+interpolates both onto a common uniform grid via \code{stats::approx()}
+before integration.  Observation times only determine the upper limit
+of the convolution integral — they do not constrain the simulation grids.
+
 The key efficiency is that the adjoint \eqn{\varphi} for a given observation
 location is computed once and shared across all observation times at that
 location.
