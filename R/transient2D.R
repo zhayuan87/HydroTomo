@@ -132,7 +132,9 @@ Ftransient2dsim <- function(domain = c(40, 40, 0, 40, 0, 40),
                 parms  = para,
                 dimens = c(nx, ny),
                 lrw    = lrw,
-                hmax   = max(diff(times)))
+                hmax   = max(diff(times)),
+                atol   = 1e-6,
+                rtol   = 1e-6)
 
   list(out   = unclass(out),   # plain matrix; drop deSolve class for easier indexing
        grid  = grid,
@@ -147,9 +149,8 @@ Ftransient2dsim <- function(domain = c(40, 40, 0, 40, 0, 40),
 #' times listed in \code{Oinf}.
 #'
 #' If an observation time does not exactly match a row in \code{result_tr},
-#' the nearest available time step is used.  To get exact values, include all
-#' observation times in the \code{times} argument of
-#' \code{\link{Ftransient2dsim}}.
+#' linear interpolation is used.  For best accuracy, include observation
+#' times in the \code{times} argument of \code{\link{Ftransient2dsim}}.
 #'
 #' @param Oinf      data frame with columns \code{data}, \code{x}, \code{y},
 #'   \code{time}.
@@ -175,8 +176,7 @@ samDataTr <- function(Oinf,
 
   Oinf$data <- mapply(
     function(nelem, t_obs) {
-      it <- which.min(abs(sim_times - t_obs))
-      out_mat[it, nelem + 1L]       # +1 offset: col 1 is time
+      approx(sim_times, out_mat[, nelem + 1L], xout = t_obs, rule = 2)$y
     },
     Oinf_elem$nelem,
     Oinf$time

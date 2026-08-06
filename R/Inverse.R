@@ -190,10 +190,6 @@ Finverse <- function(
     varobsh <- apply(obsh,2,var)
     meanobsh <- apply(obsh,2,mean)
 
-    if (ifcor) {
-      print("ifcor = TRUE: returning ensemble results without update.")
-      return(list(obsh = obsh, Tnew = Tnew, meanobsh = meanobsh))
-    }
     # get the misfit.
     weigs <- 1/varobsh/sum(1/varobsh)
     rmse <- mean((trueobsh - meanobsh)^2*weigs)^0.5
@@ -215,6 +211,10 @@ Finverse <- function(
     # covh n_obs*n_obs
     tmpy = t(log(Tnew))
     covhk = cov(obsh,tmpy)
+    if (ifcor) {
+      print("ifcor = TRUE: returning cross-covariance covhk.")
+      return(covhk)
+    }
     # add stablizer term.
     #4. ----------- solve covh ..............
     covh1 <- covh
@@ -398,17 +398,16 @@ Finverse2 <- function(
     l2 <- mean((trueobsh - meanobsh)^2)^0.5
     l1 <- mean(abs(trueobsh - meanobsh))
 
-    if (ifcor) {
-      print("ifcor = TRUE: returning ensemble results without update.")
-      return(list(obsh = obsh, Tnew = Tnew, meanobsh = meanobsh))
-    }
-
     ## we now update the covariance calculation method.
     # obsh --- n_ensemble * n_obs.
     covh = cov(obsh) # the default is y = x
     # covh n_obs*n_obs
     tmpy = t(log(Tnew))
     covhk = cov(obsh,tmpy)
+    if (ifcor) {
+      print("ifcor = TRUE: returning cross-covariance covhk.")
+      return(covhk)
+    }
     # add stablizer term.
     #4. ----------- solve covh ..............
     covh1 <- covh
@@ -586,17 +585,16 @@ Finverse3 <- function(
     l2 <- mean((trueobsh - meanobsh)^2)^0.5
     l1 <- mean(abs(trueobsh - meanobsh))
 
-    if (ifcor) {
-      print("ifcor = TRUE: returning ensemble results without update.")
-      return(list(obsh = obsh, Tnew = Tnew, meanobsh = meanobsh))
-    }
-
     ## we now update the covariance calculation method.
     # obsh --- n_ensemble * n_obs.
     covh = cov(obsh) # the default is y = x
     # covh n_obs*n_obs
     tmpy = t(log(Tnew))
     covhk = cov(obsh,tmpy)
+    if (ifcor) {
+      print("ifcor = TRUE: returning cross-covariance covhk.")
+      return(covhk)
+    }
     # add stablizer term.
     #4. ----------- solve covh ..............
     covh1 <- covh
@@ -1101,14 +1099,13 @@ Finverse3D <- function(
     l2       <- mean((trueobsh - meanobsh)^2)^0.5
     l1       <- mean(abs(trueobsh - meanobsh))
 
-    if (ifcor) {
-      print("ifcor = TRUE: returning ensemble results without update.")
-      return(list(obsh = obsh, Tnew = Tnew, meanobsh = meanobsh))
-    }
-
     # ---- Bayesian update -----------------------------------------------------
     covh  <- cov(obsh)
     covhk <- cov(obsh, t(log(Tnew)))
+    if (ifcor) {
+      print("ifcor = TRUE: returning cross-covariance covhk.")
+      return(covhk)
+    }
     covh1 <- covh
     diag(covh1) <- rep((1 + mul) * max(diag(covh)), nobs)
     a <- solve(covh1, covhk)   # nobs × n
@@ -1263,14 +1260,13 @@ Finverse3DScreen <- function(
     l2       <- mean((trueobsh - meanobsh)^2)^0.5
     l1       <- mean(abs(trueobsh - meanobsh))
 
-    if (ifcor) {
-      print("ifcor = TRUE: returning ensemble results without update.")
-      return(list(obsh = obsh, Tnew = Tnew, meanobsh = meanobsh))
-    }
-
     # ---- Bayesian update -----------------------------------------------------
     covh  <- cov(obsh)
     covhk <- cov(obsh, t(log(Knew)))
+    if (ifcor) {
+      print("ifcor = TRUE: returning cross-covariance covhk.")
+      return(covhk)
+    }
     covh1 <- covh
     diag(covh1) <- rep((1 + mul) * max(diag(covh)), nobs)
     a <- solve(covh1, covhk)
@@ -2025,8 +2021,9 @@ FinverseAdj <- function(
                     qHT = qHT, oHT = oHT, lrw = lrw)
 
     if (ifcor) {
-      print("ifcor = TRUE: returning Jacobian and simulated heads without update.")
-      return(list(J = J, h_sim = h_sim_vec))
+      covhk <- J %*% C_kk
+      print("ifcor = TRUE: returning cross-covariance covhk.")
+      return(covhk)
     }
 
     # --- Compute update (dual / observation-space formulation) ---
@@ -2092,6 +2089,33 @@ FinverseAdj <- function(
 # 2D Transient Adjoint-based Inversion
 # ==============================================================================
 
+# ---- Helper: build a "good" time grid (fine at start, coarser later) ----------
+# For groundwater pumping problems, head changes rapidly at early times and
+# slowly at late times.  A geometric progression in dt captures this efficiently.
+#
+# @param t_max   end time of the simulation (positive).
+# @param npoints desired number of output time points (default 101).
+# @param p       ratio of successive dt's (>1 ⇒ dt grows; <1 ⇒ dt shrinks).
+#                Default 1.05 means each step is 5% longer than the previous.
+# @return A strictly increasing numeric vector starting at 0 and ending
+#         approximately at t_max.
+.makeTimeGrid <- function(t_max, npoints = 101, p = 1.05) {
+  if (t_max <= 0) t_max <- 1
+  # Solve: dt1 * (p^0 + p^1 + ... + p^(npoints-2)) = t_max
+  if (abs(p - 1) < 1e-8) {
+    times <- seq(0, t_max, length.out = npoints)
+  } else {
+    # geometric sum: dt1 * (p^(npoints-1) - 1) / (p - 1) = t_max
+    dt1 <- t_max * (p - 1) / (p^(npoints - 1) - 1)
+    dts  <- dt1 * p^(seq(0, npoints - 2))
+    times <- cumsum(c(0, dts))
+    # ensure exact end
+    times <- times / max(times) * t_max
+  }
+  return(times)
+}
+
+
 #' 2D Transient adjoint (Green's function) solver
 #'
 #' Computes the adjoint variable \eqn{\varphi(\mathbf{x}, t)} for a 2D
@@ -2108,6 +2132,11 @@ FinverseAdj <- function(
 #' \eqn{\Phi} in time:
 #' \deqn{\varphi(\mathbf{x}, t) \approx \frac{\partial \Phi}{\partial t}}
 #'
+#' The time grid for the adjoint is generated independently of observation
+#' times — it only needs to span from 0 to the end of pumping (\code{t_max}).
+#' The convolution in \code{jacobian2DTr} handles time alignment via
+#' interpolation.
+#'
 #' For a fixed observation location, the same \eqn{\varphi} time series can be
 #' reused for every observation time at that location (Zha et al., 2020).
 #'
@@ -2115,26 +2144,42 @@ FinverseAdj <- function(
 #' @param TT    transmissivity field \eqn{T} \code{[L^2/T]}, length-\code{n} vector.
 #' @param SS    storage coefficient \eqn{S} [-], length-\code{n} vector or scalar.
 #' @param iobs  flat index of the observation cell.
-#' @param times numeric vector of output times (must include 0 and all relevant
-#'   observation times).
+#' @param times numeric vector of output times for the ODE solver.
+#'   If \code{NULL} (default), a geometric time grid is generated
+#'   using \code{t_max} and \code{npoints}.
+#' @param t_max end time of the adjoint simulation.  Only used when
+#'   \code{times = NULL}.  Default: 100.
+#' @param npoints number of time points for auto-generated grid (default 101).
+#' @param p_grid growth factor for auto-generated grid (default 1.05).
 #' @param lrw   real work array length for \code{ode.2D} (default 1600000).
 #' @return A list with \code{phi} (matrix \code{nt \times n} of adjoint values) and
 #'   \code{times} (the output time vector).
 #' @keywords internal
-adjoint2DTr <- function(grid, TT, SS, iobs, times, lrw = 1600000) {
+adjoint2DTr <- function(grid, TT, SS, iobs, times = NULL,
+                         t_max = 100, npoints = 101, p_grid = 1.05,
+                         lrw = 1600000) {
 
   require('deSolve')
 
-  # Unit injection at the observation cell.
-  # In diffusion2D the source term is -Qp/(dx*dy*Spm); negative Qp => injection.
-  # Qp = -1 gives an injection rate that integrates to a unit impulse over
-  # the observation cell.
-  qinf <- data.frame(Qp = -1, x = grid$grid$x[iobs], y = grid$grid$y[iobs])
-
-  # Ensure times is long enough for ode.2D
-  if (length(times) < 2) {
-    times <- seq(0, max(times, 1), length.out = 3)
+  # ---- Build time grid if not supplied ----------------------------------------
+  if (is.null(times)) {
+    times <- .makeTimeGrid(t_max, npoints, p_grid)
+  } else {
+    # Merge with a geometric grid to ensure early-time resolution for the
+    # impulse response (adjoint), which varies rapidly near t = 0.
+    auto_times <- .makeTimeGrid(max(times), npoints, p_grid)
+    times <- sort(unique(c(times, auto_times)))
+    if (length(times) < 2) {
+      times <- seq(0, max(times, 1), length.out = 3)
+    }
   }
+
+  # Unit injection at the observation cell.
+  # Note that Qp should be dx * dy, zyy20260718
+dx <- grid$dx
+dy <- grid$dy
+qinf <- data.frame(Qp = -dx * dy, x = grid$grid$x[iobs], y = grid$grid$y[iobs]) 
+#  qinf <- data.frame(Qp = -1, x = grid$grid$x[iobs], y = grid$grid$y[iobs])
 
   res <- Ftransient2dsim(grid = grid, TT = TT, SS = SS,
                           Qinf = qinf, times = times, lrw = lrw)
@@ -2173,6 +2218,12 @@ adjoint2DTr <- function(grid, TT, SS, iobs, times, lrw = 1600000) {
 #'       \left[\nabla \varphi(\mathbf{x}_Y, t-\tau) \cdot
 #'             \nabla H(\mathbf{x}_Y, \tau)\right] \, d\tau \, \Delta x \Delta y}
 #'
+#' **Time discretisation**: Forward and adjoint simulations use independent
+#' geometric time grids (fine at start, coarser later).  The convolution
+#' interpolates both onto a common uniform grid via \code{stats::approx()}
+#' before integration.  Observation times only determine the upper limit
+#' of the convolution integral — they do not constrain the simulation grids.
+#'
 #' The key efficiency is that the adjoint \eqn{\varphi} for a given observation
 #' location is computed once and shared across all observation times at that
 #' location.
@@ -2182,8 +2233,13 @@ adjoint2DTr <- function(grid, TT, SS, iobs, times, lrw = 1600000) {
 #' @param SS    storage coefficient \eqn{S} [-] (default \code{1e-4}).
 #' @param qHT   list of pumping test data frames (columns \code{Qp, x, y}).
 #' @param oHT   list of observation data frames (columns \code{data, x, y, time}).
-#' @param times numeric vector of output times for the forward/adjoint ODE solver
-#'   (default \code{seq(0, 100, by = 10)}).  Must cover all observation times.
+#' @param times numeric vector of output times for the ODE solver.
+#'   If \code{NULL} (default), a geometric grid is auto-generated.
+#' @param t_max end time of the simulation.  If \code{NULL} (default),
+#'   set to the maximum observation time across all tests.
+#' @param npoints number of time points in auto-generated grids (default 151).
+#' @param p_grid growth factor for auto-generated time grids (default 1.03).
+#' @param nconv  number of points on the common convolution grid (default 201).
 #' @param lrw   real work array length (default 1600000).
 #' @return A matrix of dimension \code{nobs x nelem}.
 #' @export
@@ -2198,22 +2254,26 @@ adjoint2DTr <- function(grid, TT, SS, iobs, times, lrw = 1600000) {
 #' }
 jacobian2DTr <- function(grid,
                          TT,
-                         SS     = 1e-4,
-                         qHT    = list(data.frame(Qp = 10, x = 20.5, y = 20.5)),
-                         oHT    = list(data.frame(data = -1, x = 11, y = 11,
+                         SS      = 1e-4,
+                         qHT     = list(data.frame(Qp = 10, x = 20.5, y = 20.5)),
+                         oHT     = list(data.frame(data = -1, x = 11, y = 11,
                                                   time = 50)),
-                         times  = seq(0, 100, by = 10),
-                         lrw    = 1600000) {
+                         times   = NULL,
+                         t_max   = NULL,
+                         npoints = 151,
+                         p_grid  = 1.03,
+                         nconv   = 201,
+                         lrw     = 1600000) {
 
   require('deSolve')
 
   nHT <- length(qHT)
-  n <- grid$n
-  nx <- grid$nx
-  ny <- grid$ny
-  dx <- grid$dx
-  dy <- grid$dy
-  dV <- dx * dy
+  n   <- grid$n
+  nx  <- grid$nx
+  ny  <- grid$ny
+  dx  <- grid$dx
+  dy  <- grid$dy
+  dV  <- dx * dy
 
   Tp <- if (length(TT) == 1) rep(TT, n) else TT
   Sp <- if (length(SS) == 1) rep(SS, n) else SS
@@ -2227,7 +2287,7 @@ jacobian2DTr <- function(grid,
          ". Use SS of length ", n, " (or a scalar).")
   }
 
-  # ---- Collect observation element indices and counts ----
+  # ---- Collect observation element indices and times ----
   loc_obsHT <- list()
   nobs_per_test <- integer(nHT)
   obs_times_HT <- list()
@@ -2240,30 +2300,28 @@ jacobian2DTr <- function(grid,
   }
   nobs <- sum(nobs_per_test)
 
-  # ---- Ensure times covers all observation times and has enough points ----
+  # ---- Determine simulation end time ----
   all_obs_times <- unique(unlist(obs_times_HT))
   if (length(all_obs_times) == 0) all_obs_times <- 0
-
-  max_time <- max(c(times, all_obs_times))
-  if (max_time <= 0) max_time <- 1
-
-  if (length(times) < 2) {
-    times <- seq(0, max_time, length.out = 51)
+  if (is.null(t_max)) {
+    t_max <- max(all_obs_times)
   }
+  if (t_max <= 0) t_max <- 1
 
-  # Append any missing observation times and sort
-  if (!all(all_obs_times %in% times)) {
-    times <- sort(unique(c(times, all_obs_times)))
+  # ---- Build simulation time grids (independent of obs times) ----
+  if (is.null(times)) {
+    sim_times <- .makeTimeGrid(t_max, npoints, p_grid)
+  } else {
+    # Merge user-supplied times with a geometric grid to ensure sufficient
+    # resolution at early times where the adjoint impulse response varies
+    # rapidly.  Without this, sparse uniform grids (e.g. seq(0,50,1)) can
+    # severely degrade the accuracy of the convolution integral.
+    auto_times <- .makeTimeGrid(t_max, npoints, p_grid)
+    sim_times <- sort(unique(c(times, auto_times)))
+    if (length(sim_times) < 2) {
+      sim_times <- seq(0, max(sim_times, t_max, 1), length.out = npoints)
+    }
   }
-
-  # Warn if times are not evenly spaced (convolution assumes uniform grid)
-  dt_diff <- diff(times)
-  if (max(dt_diff) - min(dt_diff) > 1e-6 * max(dt_diff)) {
-    warning("Time grid is not uniform; transient adjoint convolution may be inaccurate.")
-  }
-
-  # ---- Pre-allocate Jacobian ----
-  J <- matrix(0, nrow = nobs, ncol = n)
 
   # ---- Helper: compute cell-centred 2D gradients ----
   grad2D <- function(v) {
@@ -2283,14 +2341,17 @@ jacobian2DTr <- function(grid,
     list(x = as.vector(gx), y = as.vector(gy))
   }
 
+  # ---- Pre-allocate Jacobian ----
+  J <- matrix(0, nrow = nobs, ncol = n)
+
   # ---- Forward simulations for each pumping test ----
   fwd_cache <- list()
   for (j in seq_len(nHT)) {
     res_fwd <- Ftransient2dsim(grid = grid, TT = Tp, SS = Sp,
-                                Qinf = qHT[[j]], times = times, lrw = lrw)
+                                Qinf = qHT[[j]], times = sim_times, lrw = lrw)
     out_fwd <- res_fwd$out
-    sim_times <- out_fwd[, 1]
-    h_mat <- out_fwd[, -1, drop = FALSE]  # nt x n
+    fwd_t <- out_fwd[, 1]
+    h_mat  <- out_fwd[, -1, drop = FALSE]
 
     nt <- nrow(h_mat)
     grad_h_x <- matrix(0, nt, n)
@@ -2302,7 +2363,7 @@ jacobian2DTr <- function(grid,
     }
 
     fwd_cache[[j]] <- list(
-      times = sim_times, h = h_mat,
+      times = fwd_t, h = h_mat,
       grad_x = grad_h_x, grad_y = grad_h_y
     )
   }
@@ -2312,9 +2373,9 @@ jacobian2DTr <- function(grid,
   adj_cache <- list()
   for (iobs in all_obs_locs) {
     adj_res <- adjoint2DTr(grid = grid, TT = Tp, SS = Sp,
-                            iobs = iobs, times = times, lrw = lrw)
-    phi <- adj_res$phi
-    sim_times <- adj_res$times
+                            iobs = iobs, times = sim_times, lrw = lrw)
+    phi       <- adj_res$phi
+    adj_t     <- adj_res$times
 
     nt <- nrow(phi)
     grad_phi_x <- matrix(0, nt, n)
@@ -2326,58 +2387,66 @@ jacobian2DTr <- function(grid,
     }
 
     adj_cache[[as.character(iobs)]] <- list(
-      times = sim_times,
+      times = adj_t,
       grad_x = grad_phi_x, grad_y = grad_phi_y
     )
+  }
+
+  # ---- Convolution helper: interpolate grad vectors to a common time grid ----
+  # Returns a matrix nt_common x n of interpolated values.
+  .interpGrad <- function(t_old, grad_mat, t_new) {
+    nt_new <- length(t_new)
+    ncell  <- ncol(grad_mat)
+    out <- matrix(0, nt_new, ncell)
+    for (ic in seq_len(ncell)) {
+      out[, ic] <- approx(t_old, grad_mat[, ic], xout = t_new, rule = 2)$y
+    }
+    out
   }
 
   # ---- Compute sensitivity by time convolution ----
   row_offset <- 0
   for (j in seq_len(nHT)) {
     obs_elem <- loc_obsHT[[j]]
-    obs_t <- obs_times_HT[[j]]
-    nlocal <- length(obs_elem)
+    obs_t    <- obs_times_HT[[j]]
+    nlocal   <- length(obs_elem)
 
     fwd <- fwd_cache[[j]]
     fwd_times <- fwd$times
-    nt <- length(fwd_times)
 
     for (i_local in seq_len(nlocal)) {
       iobs <- obs_elem[i_local]
       tobs_i <- obs_t[i_local]
       global_row <- row_offset + i_local
 
+      if (tobs_i <= 0) next  # no sensitivity at t=0
+
       adj <- adj_cache[[as.character(iobs)]]
 
-      # Find observation index in the time grid
-      k_obs <- which.min(abs(fwd_times - tobs_i))
-      if (abs(fwd_times[k_obs] - tobs_i) > 1e-6) {
-        warning("Observation time ", tobs_i, " not found in time grid; using nearest.")
-      }
+      # ---- Build common convolution time grid [0, tobs] ----
+      t_conv <- seq(0, tobs_i, length.out = nconv)
+      dt_conv <- t_conv[2] - t_conv[1]
 
-      # Convolution: J = T * dV * integral_0^tobs grad_h(tau) . grad_phi(tobs-tau) dtau
-      S_int <- rep(0, n)
+      # Interpolate forward and adjoint gradients onto t_conv
+      # Forward:  grad_h(tau)    for tau in [0, tobs]
+      grad_hx <- .interpGrad(fwd_times, fwd$grad_x, t_conv)
+      grad_hy <- .interpGrad(fwd_times, fwd$grad_y, t_conv)
 
-      for (jt in seq_len(k_obs)) {
-        # Index of adjoint at time tobs - tau = times[k_obs - jt + 1]
-        k_adj <- k_obs - jt + 1
-        if (k_adj < 1 || k_adj > nt) next
+      # Adjoint:  grad_phi(tobs - tau)  for tau in [0, tobs]
+      t_adj_target <- tobs_i - t_conv  # tobs, tobs-dt, ..., 0
+      grad_px <- .interpGrad(adj$times, adj$grad_x, t_adj_target)
+      grad_py <- .interpGrad(adj$times, adj$grad_y, t_adj_target)
 
-        # Trapezoidal weight
-        if (k_obs == 1) {
-          dt <- 0
-        } else if (jt == 1) {
-          dt <- (fwd_times[2] - fwd_times[1]) / 2
-        } else if (jt == k_obs) {
-          dt <- (fwd_times[k_obs] - fwd_times[k_obs - 1]) / 2
-        } else {
-          dt <- (fwd_times[jt + 1] - fwd_times[jt - 1]) / 2
-        }
 
-        integrand <- fwd$grad_x[jt, ] * adj$grad_x[k_adj, ] +
-                     fwd$grad_y[jt, ] * adj$grad_y[k_adj, ]
-
-        S_int <- S_int + integrand * dt
+      # ---- Trapezoidal integration over t_conv ----
+      integrand <- grad_hx * grad_px + grad_hy * grad_py
+      # Trapezoidal rule: sum_{i} (integrand[i] + integrand[i+1])/2 * dt
+      ntc <- nrow(integrand)
+      if (ntc > 1) {
+        S_int <- dt_conv * (colSums(integrand[-ntc, , drop = FALSE]) +
+                            colSums(integrand[-1,   , drop = FALSE])) / 2
+      } else {
+        S_int <- rep(0, n)
       }
 
       J[global_row, ] <- -Tp * S_int * dV
@@ -2413,8 +2482,11 @@ jacobian2DTr <- function(grid,
 #' @param oHT      list of observation data frames (columns \code{data, x, y, time}).
 #' @param SS       storage coefficient \eqn{S} [-] — scalar or length-\code{n}
 #'   vector (default \code{1e-4}).
-#' @param times    numeric vector of output times for the ODE solver (default
-#'   \code{seq(0, 100, by = 10)}).
+#' @param times    numeric vector of output times for the ODE solver.
+#'   If \code{NULL} (default), a geometric grid is auto-generated.
+#' @param npoints  number of time points for auto-generated grids (default 151).
+#' @param p_grid   growth factor for auto-generated time grids (default 1.03).
+#' @param nconv    number of points on the common convolution grid (default 201).
 #' @param lrw      real work array length for \code{ode.2D} (default 1600000).
 #' @param sigma2obs observation error variance (default 1e-4).
 #' @param lambda_lm Levenberg-Marquardt damping parameter (default 1.0); decays
@@ -2453,7 +2525,10 @@ FinverseAdjTr <- function(
     rmsemin     = 0,
     oHT         = list(data.frame(data = -1, x = 11, y = 11, time = 50)),
     SS          = 1e-4,
-    times       = seq(0, 100, by = 10),
+    times       = NULL,
+    npoints     = 151,
+    p_grid      = 1.03,
+    nconv       = 201,
     lrw         = 1600000,
     sigma2obs   = 1e-4,
     lambda_lm   = 1.0,
@@ -2484,12 +2559,15 @@ FinverseAdjTr <- function(
   trueobsh <- unlist(trueobshHT)
   nobs <- length(trueobsh)
 
-  # ---- Ensure times covers all observation times ----
+  # ---- Build simulation time grid (independent of obs times) ----
   all_obs_times <- unique(unlist(lapply(oHT, function(x) x$time)))
-  if (!all(all_obs_times %in% times)) {
-    times <- sort(unique(c(times, all_obs_times)))
-    message("times extended to cover all observation times: ",
-            paste(times, collapse = ", "))
+  if (length(all_obs_times) == 0) all_obs_times <- 0
+  t_max <- max(all_obs_times)
+
+  if (is.null(times)) {
+    sim_times <- .makeTimeGrid(t_max, npoints, p_grid)
+  } else {
+    sim_times <- times
   }
 
   # ---- Build prior covariance C_kk from geostatistical model ----
@@ -2530,7 +2608,7 @@ FinverseAdjTr <- function(
 
     # --- Forward simulation at current T ---
     h_sim_vec <- samHTtr(grid = grid, TT = T_current, SS = SS,
-                         qHT = qHT, oHT = oHT, times = times, lrw = lrw)
+                         qHT = qHT, oHT = oHT, times = sim_times, lrw = lrw)
 
     # --- Misfit ---
     residual <- trueobsh - h_sim_vec
@@ -2547,11 +2625,13 @@ FinverseAdjTr <- function(
 
     # --- Compute Jacobian ---
     J <- jacobian2DTr(grid = grid, TT = T_current, SS = SS,
-                      qHT = qHT, oHT = oHT, times = times, lrw = lrw)
+                      qHT = qHT, oHT = oHT,
+                      times = sim_times, nconv = nconv, lrw = lrw)
 
     if (ifcor) {
-      print("ifcor = TRUE: returning Jacobian and simulated heads without update.")
-      return(list(J = J, h_sim = h_sim_vec))
+      covhk <- J %*% C_kk
+      print("ifcor = TRUE: returning cross-covariance covhk.")
+      return(covhk)
     }
 
     # --- Compute update (dual / observation-space formulation) ---
@@ -2768,8 +2848,9 @@ Finverse3DAdj <- function(
                     qHT = qHT, oHT = oHT, lrw = lrw)
 
     if (ifcor) {
-      print("ifcor = TRUE: returning Jacobian and simulated heads without update.")
-      return(list(J = J, h_sim = h_sim_vec))
+      covhk <- J %*% C_kk
+      print("ifcor = TRUE: returning cross-covariance covhk.")
+      return(covhk)
     }
 
     # --- Compute update (dual / observation-space formulation) ---
@@ -2979,8 +3060,9 @@ Finverse3DScreenAdj <- function(
                           qHT = qHT, oHT = oHT, lrw = lrw)
 
     if (ifcor) {
-      print("ifcor = TRUE: returning Jacobian and simulated heads without update.")
-      return(list(J = J, h_sim = h_sim_vec))
+      covhk <- J %*% C_kk
+      print("ifcor = TRUE: returning cross-covariance covhk.")
+      return(covhk)
     }
 
     # --- Compute update (dual / observation-space formulation) ---
@@ -3266,14 +3348,13 @@ Finverse3Tr <- function(
     l2       <- mean((trueobsh - meanobsh)^2)^0.5
     l1       <- mean(abs(trueobsh - meanobsh))
 
-    if (ifcor) {
-      print("ifcor = TRUE: returning ensemble results without update.")
-      return(list(obsh = obsh, Tnew = Tnew, meanobsh = meanobsh))
-    }
-
     # ---- Bayesian update (same as steady-state) ------------------------------
     covh  <- cov(obsh)
     covhk <- cov(obsh, t(log(Tnew)))
+    if (ifcor) {
+      print("ifcor = TRUE: returning cross-covariance covhk.")
+      return(covhk)
+    }
     covh1 <- covh
     diag(covh1) <- rep((1 + mul) * max(diag(covh)), nobs)
     a <- solve(covh1, covhk)   # nobs × n
@@ -3545,14 +3626,13 @@ Finverse3DTr <- function(
     l2       <- mean((trueobsh - meanobsh)^2)^0.5
     l1       <- mean(abs(trueobsh - meanobsh))
 
-    if (ifcor) {
-      print("ifcor = TRUE: returning ensemble results without update.")
-      return(list(obsh = obsh, Tnew = Knew, meanobsh = meanobsh))
-    }
-
     # ---- Bayesian update (same as steady-state) ------------------------------
     covh  <- cov(obsh)
     covhk <- cov(obsh, t(log(Knew)))
+    if (ifcor) {
+      print("ifcor = TRUE: returning cross-covariance covhk.")
+      return(covhk)
+    }
     covh1 <- covh
     diag(covh1) <- rep((1 + mul) * max(diag(covh)), nobs)
     a <- solve(covh1, covhk)   # nobs × n
@@ -3835,14 +3915,13 @@ Finverse3DTrScreen <- function(
     l2       <- mean((trueobsh - meanobsh)^2)^0.5
     l1       <- mean(abs(trueobsh - meanobsh))
 
-    if (ifcor) {
-      print("ifcor = TRUE: returning ensemble results without update.")
-      return(list(obsh = obsh, Tnew = Tnew, meanobsh = meanobsh))
-    }
-
     # ---- Bayesian update -----------------------------------------------------
     covh  <- cov(obsh)
     covhk <- cov(obsh, t(log(Knew)))
+    if (ifcor) {
+      print("ifcor = TRUE: returning cross-covariance covhk.")
+      return(covhk)
+    }
     covh1 <- covh
     diag(covh1) <- rep((1 + mul) * max(diag(covh)), nobs)
     a <- solve(covh1, covhk)

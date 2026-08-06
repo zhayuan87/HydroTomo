@@ -36,11 +36,11 @@ Plotsteady2d <- function(s, palette="viridis",plotshow = TRUE,
 
   if (ifdrawdown) {
     s$solution = - s$solution
-    if(!is.null(title)) title = "2D Steady-State Drawdown Distribution"
-    if(!is.null(z))z = "Drawdown"
+    if(is.null(title)) title = "2D Steady-State Drawdown Distribution"
+    if(is.null(z))z = "Drawdown"
   } else {
-    if(!is.null(title))title = "2D Steady-State Head Distribution"
-    if(!is.null(z))z = "Head"
+    if(is.null(title))title = "2D Steady-State Head Distribution"
+    if(is.null(z))z = "Head"
   }
 
   require('ggplot2')
@@ -97,11 +97,11 @@ Plotparameter2d <- function(TT, palette="viridis",plotshow = TRUE,
 
   if (iflog) {
     TT$Tp = log(TT$Tp)
-    if(!is.null(title)) title = "2D log-transformed Transimisivity"
-    if(!is.null(z))z = expression("log(T) ["*L^2*"/T]")
+    if(is.null(title)) title = "2D log-transformed Transimisivity"
+    if(is.null(z))z = expression("log(T) ["*L^2*"/T]")
   } else {
-    if(!is.null(title)) title = "2D Transimisivity"
-    if(!is.null(z)) z = expression("T ["*L^2*"/T]")
+    if(is.null(title)) title = "2D Transimisivity"
+    if(is.null(z)) z = expression("T ["*L^2*"/T]")
   }
 
   require('ggplot2')
@@ -932,22 +932,14 @@ PlotTr3d <- function(result_tr,
 #' Given a \code{covhk} matrix returned by any parallel 2D inversion function
 #' (e.g. \code{Finverse3}, \code{Finverse3Tr}) with \code{ifcor = TRUE}, this
 #' function plots the cross-covariance between one selected observation's head
-#' and the log-transmissivity at every grid cell.  Pumping-well and
-#' observation-well locations are overlaid.
+#' and the log-transmissivity at every grid cell.  Use \code{+ geom_point()} /
+#' \code{geom_text()} externally to overlay well locations.
 #'
 #' @param covhk  \code{nobs × n} cross-covariance matrix (heads × ln-T),
 #'   returned by a \code{Finverse*} function with \code{ifcor = TRUE}.
 #' @param grid   grid list from \code{GenGrid()}.
 #' @param iobs   integer; which observation row of \code{covhk} to plot
 #'   (1-based index into the concatenated observation vector).
-#' @param qHT    list of pumping-test data frames (columns \code{Qp, x, y}),
-#'   used to overlay well locations and auto-label.
-#' @param oHT    list of observation data frames (columns \code{data, x, y}),
-#'   used to overlay well locations and auto-label.
-#' @param labels  optional character vector of custom labels for observations.
-#'   If \code{NULL} (default), labels are auto-generated as \code{"P1 (x,y)"},
-#'   \code{"P2 (x,y)"}, … for pumping wells and \code{"O (x,y)"} for
-#'   observation wells.
 #' @param palette  \code{viridis} palette option (default \code{"viridis"}).
 #' @param title    plot title; auto-generated if \code{NULL}.
 #' @param zlab     colour-bar label; default \code{"Cov(h, lnT)"}.
@@ -959,14 +951,11 @@ PlotTr3d <- function(result_tr,
 #' @examples
 #' \dontrun{
 #' covhk <- Finverse3(grid = grid, qHT = qHT, oHT = oHT, ifcor = TRUE)
-#' covhkPlot2D(covhk, grid, iobs = 1, qHT = qHT, oHT = oHT)
+#' covhkPlot2D(covhk, grid, iobs = 1)
 #' }
 covhkPlot2D <- function(covhk,
                          grid,
                          iobs       = 1L,
-                         qHT        = NULL,
-                         oHT        = NULL,
-                         labels     = NULL,
                          palette    = "viridis",
                          title      = NULL,
                          zlab       = "Cov(h, lnT)",
@@ -990,14 +979,9 @@ covhkPlot2D <- function(covhk,
   vals <- as.vector(covhk[iobs, ])
   df   <- data.frame(x = grid$grid$x, y = grid$grid$y, cov = vals)
 
-  # ---- build observation-index lookup ----------------------------------------
-  # Each observation in oHT is a row; concatenated across all tests.
-  obs_info <- .build_obs_info_2d(oHT, qHT, labels)
-
   # ---- auto title ------------------------------------------------------------
   if (is.null(title)) {
-    title <- paste0("Cross-covariance: obs ", iobs,
-                    " [", obs_info$label[iobs], "]")
+    title <- paste0("Cross-covariance: obs ", iobs)
   }
 
   # ---- plot ------------------------------------------------------------------
@@ -1007,34 +991,6 @@ covhkPlot2D <- function(covhk,
     labs(title = title, x = xlab, y = ylab, fill = zlab) +
     coord_fixed()
 
-  # ---- overlay pumping wells -------------------------------------------------
-  if (!is.null(qHT)) {
-    qdf <- .flatten_qHT_2d(qHT, labels)
-    p <- p +
-      geom_point(data = qdf, aes(x = x, y = y),
-                 color = "red", fill = "white", shape = 21, size = 3,
-                 inherit.aes = FALSE) +
-      geom_text(data = qdf, aes(x = x, y = y, label = label),
-                color = "red", vjust = -1, size = 3, inherit.aes = FALSE)
-  }
-
-  # ---- overlay observation wells ---------------------------------------------
-  if (!is.null(oHT)) {
-    odf <- obs_info
-    # highlight the selected observation
-    odf$highlight <- seq_len(nrow(odf)) == iobs
-    p <- p +
-      geom_point(data = odf, aes(x = x, y = y,
-                                  color = highlight, shape = highlight),
-                 fill = "yellow", size = 2.5, inherit.aes = FALSE) +
-      scale_color_manual(values = c("FALSE" = "yellow", "TRUE" = "cyan"),
-                         guide = "none") +
-      scale_shape_manual(values = c("FALSE" = 22, "TRUE" = 23),
-                         guide = "none") +
-      geom_text(data = odf, aes(x = x, y = y, label = label),
-                color = "yellow3", vjust = -1, size = 2.5, inherit.aes = FALSE)
-  }
-
   if (!is.null(plotfile)) {
     ggsave(plotfile, width = plotwidth, height = plotheight)
   }
@@ -1043,60 +999,6 @@ covhkPlot2D <- function(covhk,
 }
 
 
-# ---- Internal: build observation info for 2D ----------------------------------
-.build_obs_info_2d <- function(oHT, qHT, labels) {
-  if (is.null(oHT)) {
-    return(data.frame(x = numeric(0), y = numeric(0),
-                      label = character(0), stringsAsFactors = FALSE))
-  }
-  require(dplyr)
-  odf_all <- bind_rows(oHT, .id = "test_id")
-
-  # determine x/y column names
-  xy_cols <- if ("xp" %in% names(odf_all)) c("xp", "yp") else c("x", "y")
-  # for Qinf data frames the columns are Qp, xp, yp (steady) or Qp, x, y (transient)
-  q_xy <- if (!is.null(qHT)) {
-    q1 <- qHT[[1]]
-    if ("xp" %in% names(q1)) c("xp", "yp") else c("x", "y")
-  } else {
-    c("x", "y")
-  }
-
-  # observation well positions
-  x <- odf_all[[xy_cols[1]]]
-  y <- odf_all[[xy_cols[2]]]
-
-  if (is.null(labels)) {
-    label <- paste0("O(", round(x, 1), ",", round(y, 1), ")")
-  } else {
-    label <- labels
-  }
-
-  data.frame(x = x, y = y, label = label, stringsAsFactors = FALSE)
-}
-
-
-# ---- Internal: flatten qHT to a data frame with labels -----------------------
-.flatten_qHT_2d <- function(qHT, labels) {
-  if (is.null(qHT)) return(data.frame())
-  ntest <- length(qHT)
-  xy_cols <- if ("xp" %in% names(qHT[[1]])) c("xp", "yp") else c("x", "y")
-
-  x <- numeric(ntest)
-  y <- numeric(ntest)
-  for (i in seq_len(ntest)) {
-    x[i] <- qHT[[i]][[xy_cols[1]]][1]
-    y[i] <- qHT[[i]][[xy_cols[2]]][1]
-  }
-
-  if (is.null(labels)) {
-    label <- paste0("P", seq_len(ntest), "(", round(x, 1), ",", round(y, 1), ")")
-  } else {
-    label <- labels[seq_len(ntest)]
-  }
-
-  data.frame(x = x, y = y, label = label, stringsAsFactors = FALSE)
-}
 
 
 # ==============================================================================
@@ -1109,19 +1011,14 @@ covhkPlot2D <- function(covhk,
 #' from \code{Finverse3D}, \code{Finverse3DTr}, or \code{Finverse3DTrScreen}
 #' (all with \code{ifcor = TRUE}), this function plots a horizontal z-slice of
 #' the cross-covariance between one observation's head and log-K at every grid
-#' cell.  Pumping and observation well locations (projected onto the slice) are
-#' overlaid.
+#' cell.  Use \code{+ geom_point()} / \code{geom_text()} externally to overlay
+#' well locations.
 #'
 #' @param covhk   \code{nobs × n} cross-covariance matrix.
 #' @param grid    grid from \code{GenGrid3D()}.
 #' @param iobs    integer; which observation row to plot.
 #' @param zslice  z coordinate \code{[L]} of the horizontal slice to display.
 #'   Default: middle layer of the grid.
-#' @param qHT     list of pumping-test data frames (columns
-#'   \code{Qp, x, y, z} or \code{Qp, x, y, z_top, z_bottom}).
-#' @param oHT     list of observation data frames (columns
-#'   \code{data, x, y, z} or \code{data, x, y, z_top, z_bottom}).
-#' @param labels  optional custom labels.  Auto-generated if \code{NULL}.
 #' @param palette  \code{viridis} palette option.
 #' @param title    plot title.
 #' @param zlab     colour-bar label.
@@ -1133,15 +1030,12 @@ covhkPlot2D <- function(covhk,
 #' @examples
 #' \dontrun{
 #' covhk <- Finverse3D(grid = grid3d, qHT = qHT, oHT = oHT, ifcor = TRUE)
-#' covhkPlot3D(covhk, grid3d, iobs = 1, qHT = qHT, oHT = oHT)
+#' covhkPlot3D(covhk, grid3d, iobs = 1)
 #' }
 covhkPlot3D <- function(covhk,
                          grid,
                          iobs       = 1L,
                          zslice     = NULL,
-                         qHT        = NULL,
-                         oHT        = NULL,
-                         labels     = NULL,
                          palette    = "viridis",
                          title      = NULL,
                          zlab       = "Cov(h, lnK)",
@@ -1173,13 +1067,9 @@ covhkPlot3D <- function(covhk,
                      y   = grid$grid$y[idx],
                      cov = vals)
 
-  # ---- build observation info ------------------------------------------------
-  obs_info <- .build_obs_info_3d(oHT, qHT, labels)
-
   # ---- auto title ------------------------------------------------------------
   if (is.null(title)) {
     title <- paste0("Cross-covariance: obs ", iobs,
-                    " [", obs_info$label[iobs], "]",
                     "  (z = ", round(zslice, 2), " m)")
   }
 
@@ -1190,33 +1080,6 @@ covhkPlot3D <- function(covhk,
     labs(title = title, x = xlab, y = ylab, fill = zlab) +
     coord_fixed()
 
-  # ---- overlay pumping wells -------------------------------------------------
-  if (!is.null(qHT)) {
-    qdf <- .flatten_qHT_3d(qHT, labels)
-    p <- p +
-      geom_point(data = qdf, aes(x = x, y = y),
-                 color = "red", fill = "white", shape = 21, size = 3,
-                 inherit.aes = FALSE) +
-      geom_text(data = qdf, aes(x = x, y = y, label = label),
-                color = "red", vjust = -1, size = 3, inherit.aes = FALSE)
-  }
-
-  # ---- overlay observation wells ---------------------------------------------
-  if (!is.null(oHT)) {
-    odf <- obs_info
-    odf$highlight <- seq_len(nrow(odf)) == iobs
-    p <- p +
-      geom_point(data = odf, aes(x = x, y = y,
-                                  color = highlight, shape = highlight),
-                 fill = "yellow", size = 2.5, inherit.aes = FALSE) +
-      scale_color_manual(values = c("FALSE" = "yellow", "TRUE" = "cyan"),
-                         guide = "none") +
-      scale_shape_manual(values = c("FALSE" = 22, "TRUE" = 23),
-                         guide = "none") +
-      geom_text(data = odf, aes(x = x, y = y, label = label),
-                color = "yellow3", vjust = -1, size = 2.5, inherit.aes = FALSE)
-  }
-
   if (!is.null(plotfile)) {
     ggsave(plotfile, width = plotwidth, height = plotheight)
   }
@@ -1225,30 +1088,6 @@ covhkPlot3D <- function(covhk,
 }
 
 
-# ---- Internal: build observation info for 3D ---------------------------------
-.build_obs_info_3d <- function(oHT, qHT, labels) {
-  if (is.null(oHT)) {
-    return(data.frame(x = numeric(0), y = numeric(0),
-                      label = character(0), stringsAsFactors = FALSE))
-  }
-  require(dplyr)
-  odf_all <- bind_rows(oHT, .id = "test_id")
-
-  # determine x/y column names (robust to steady vs transient vs screen)
-  xcol <- if ("xp" %in% names(odf_all)) "xp" else "x"
-  ycol <- if ("yp" %in% names(odf_all)) "yp" else "y"
-
-  x <- odf_all[[xcol]]
-  y <- odf_all[[ycol]]
-
-  if (is.null(labels)) {
-    label <- paste0("O(", round(x, 1), ",", round(y, 1), ")")
-  } else {
-    label <- labels
-  }
-
-  data.frame(x = x, y = y, label = label, stringsAsFactors = FALSE)
-}
 
 
 # ==============================================================================
@@ -1409,24 +1248,4 @@ PlotJ2d <- function(J,
 }
 
 
-# ---- Internal: flatten 3D qHT to a data frame with labels --------------------
-.flatten_qHT_3d <- function(qHT, labels) {
-  if (is.null(qHT)) return(data.frame())
-  ntest <- length(qHT)
-  xy_cols <- if ("xp" %in% names(qHT[[1]])) c("xp", "yp") else c("x", "y")
 
-  x <- numeric(ntest)
-  y <- numeric(ntest)
-  for (i in seq_len(ntest)) {
-    x[i] <- qHT[[i]][[xy_cols[1]]][1]
-    y[i] <- qHT[[i]][[xy_cols[2]]][1]
-  }
-
-  if (is.null(labels)) {
-    label <- paste0("P", seq_len(ntest), "(", round(x, 1), ",", round(y, 1), ")")
-  } else {
-    label <- labels[seq_len(ntest)]
-  }
-
-  data.frame(x = x, y = y, label = label, stringsAsFactors = FALSE)
-}
