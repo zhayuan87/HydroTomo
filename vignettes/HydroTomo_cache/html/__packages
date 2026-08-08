@@ -4,3 +4,9 @@ ggplot2
 gstat
 dplyr
 ggpubr
+foreach
+iterators
+doParallel
+ggpp
+tibble
+patchwork

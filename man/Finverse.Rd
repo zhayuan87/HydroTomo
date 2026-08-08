@@ -2,7 +2,7 @@
 % Please edit documentation in R/Inverse.R
 \name{Finverse}
 \alias{Finverse}
-\title{2D Ensemble-based Bayesian inversion for hydraulic tomography (serial)}
+\title{2D Ensemble-based Bayesian inversion for hydraulic tomography}
 \usage{
 Finverse(
   domain = c(40, 40, 0, 40, 0, 40),
@@ -16,62 +16,44 @@ Finverse(
   decay = 1.05,
   oHT = list(data.frame(data = -1, x = 11, y = 11)),
   lrw = 160000,
+  ncore = 10,
   geo = list(me = 0, var = 1, geomod = "Exp", anis = c(90, 1), range = 30, nugget = 0),
   ifcor = FALSE
 )
 }
 \arguments{
-\item{domain}{a 6-element vector \code{c(nx, ny, x1, x2, y1, y2)}.  \code{nx}
-and \code{ny} are cell counts; \code{x1:x2} and \code{y1:y2} are domain
-extents \code{[L]}.}
+\item{domain}{a 6-element vector \code{c(nx, ny, x1, x2, y1, y2)} \code{[L]}.}
 
-\item{grid}{grid list from \code{GenGrid()}; generated from \code{domain} if
-\code{NULL}.}
+\item{grid}{grid list from \code{GenGrid()}.}
 
-\item{qHT}{list of pumping test data frames, each with columns \code{Qp}
-\code{[L\eqn{^3}/T]}, \code{x} \code{[L]}, \code{y} \code{[L]}.}
+\item{qHT}{list of pumping test data frames (\code{Qp, x, y}).}
 
-\item{nsim}{ensemble size (number of realisations).  Default 50; use smaller
-values for testing.}
+\item{nsim}{ensemble size (default 50).}
 
 \item{itermax}{maximum number of iterations.}
 
-\item{varmeanTmax}{convergence threshold on the spatial variance of mean
-ln(T).  Iteration stops when this variance exceeds the threshold.}
+\item{varmeanTmax}{convergence threshold on variance of mean ln(T).}
 
-\item{rmsemin}{minimum weighted RMSE stopping criterion.  Iteration stops
-when RMSE falls below this value.}
+\item{rmsemin}{minimum RMSE stopping criterion.}
 
-\item{mul}{stabiliser coefficient (default 1.0).  Added to the diagonal of
-the head covariance matrix to improve numerical stability.  The value
-decays by \code{decay} each iteration.}
+\item{mul}{stabiliser coefficient (default 1.0).}
 
-\item{decay}{stabiliser decay factor per iteration (default 1.05).
-\code{mul <- mul / decay} at the end of each iteration.}
+\item{decay}{stabiliser decay factor (default 1.05).}
 
-\item{oHT}{list of observation data frames, each with columns \code{data}
-\code{[L]}, \code{x} \code{[L]}, \code{y} \code{[L]}.}
+\item{oHT}{list of observation data frames (\code{data, x, y}).}
 
-\item{lrw}{integer, the length of the real work array for \code{steady.2D}.
-Default 160000; increase for larger grids.}
+\item{lrw}{real work array length for \code{steady.2D} (default 160000).}
 
-\item{geo}{prior geostatistical parameters — same list structure as
-\code{random2d()}: \code{list(me, var, geomod, anis, range, nugget)}.
-\code{me} and \code{var} are the mean and variance of ln(T);
-\code{geomod} is the variogram model type (e.g. \code{"Exp"});
-\code{anis} is \code{c(azimuth_deg, ratio)}; \code{range} is the
-correlation range \code{[L]}; \code{nugget} is the nugget variance.}
+\item{ncore}{integer, the number of CPU cores for parallel execution
+(default 10).}
 
-\item{ifcor}{logical; if \code{TRUE}, returns the ensemble results after
-the first iteration without performing the update. Useful for checking#'   forward simulations before running the full inversion.}
+\item{geo}{prior geostatistical parameters: \code{list(me, var, geomod, anis, range, nugget)}.}
 }
 \value{
 A list of per-iteration results, each element a list with
 \code{meanT} (mean ln(T) vector), \code{varT} (variance of ln(T)),
 \code{meanobsh} (mean simulated head), \code{varobsh} (variance of
-simulated head).  When \code{ifcor = TRUE}, returns list with
-\code{obsh} (simulated heads), \code{Tnew} (ensemble), and
-\code{meanobsh}.
+simulated head).
 }
 \description{
 Performs ensemble-smoother-based Bayesian inversion to estimate the 2D
@@ -88,8 +70,8 @@ applied to the diagonal of \eqn{\mathbf{C}_{hh}} and decays by a factor
 \code{decay} each iteration.
 }
 \details{
-This version uses serial \code{lapply} for forward simulations.  For
-parallel execution see \code{\link{Finverse3}}.
+This version uses the \pkg{foreach} + \pkg{doParallel} framework
+(\code{\%dopar\%}) for parallel forward simulations across ensemble members.
 }
 \examples{
 set.seed(100)

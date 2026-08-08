@@ -37,14 +37,23 @@ Runs \code{samHT} for each ensemble member in parallel using
 \pkg{foreach} + \pkg{doParallel} (\code{\%dopar\%}).  Returns a matrix
 where each row corresponds to one ensemble member and columns are observed
 heads concatenated across all pumping tests.  Used internally by
-\code{\link{Finverse3}}.
+\code{\link{Finverse}}.
+}
+\details{
+\strong{Important:} A parallel backend must be registered
+(e.g. via \code{doParallel::registerDoParallel(cores = ncore)}) before
+calling this function.  \code{Finverse} sets up the backend automatically;
+standalone calls need explicit registration.
 }
 \examples{
-domain=c(80,80,0,80,0,80)
-grid <- GenGrid(domain=domain)
+data("ht9_synthetic")
+grid <- ht9_synthetic$grid
+oHT <- ht9_synthetic$oHT
+qHT <- ht9_synthetic$qHT
 TT= random2d(nsim=50,grid=grid)
 TT = TT[,-c(1,2)]
-data("oHT")
-data("qHT")
+cl <- parallel::makeCluster(10)
+doParallel::registerDoParallel(cl)
 da = samHTmcPar(grid =grid, TT=TT, qHT= qHT, oHT=oHT,lrw=320000,ncore=10)
+parallel::stopCluster(cl)
 }

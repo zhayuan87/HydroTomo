@@ -1,0 +1,150 @@
+---
+title: "ht9_synthetic"
+author:
+  - name: "Yuanyuan Zha"
+    affiliation: "Wuhan University"
+    email: "zhayuan87@whu.edu.cn"
+    orcid: "0000-0003-4323-0730"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{ht9_synthetic}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>",
+  fig.width=6,
+  fig.height=6
+)
+```
+
+# HT 9-well synthetic example
+
+This vignette demonstrates a simple 9-well hydraulic tomography setup on a 9 * 9 grid.
+Nine wells are placed at grid positions 3, 5, 7 in both x and y directions (3 * 3 layout).
+All 9 sequential pumping tests are performed: when well *i* pumps, the remaining 8 wells observe.
+
+First we load the package.
+
+```{r setup}
+library(HydroTomo)
+```
+
+## Generate true transmissivity field
+
+We set the random seed for reproducibility and generate a log-normal transmissivity
+field on a 9&times;9 grid.
+
+```{r generate_trueK}
+set.seed(100)
+domain <- c(9, 9, 0, 9, 0, 9)
+grid <- GenGrid(domain = domain)
+
+# Moderately heterogeneous aquifer: mean ln(T) = 3 (T ~ 20 m2/d)
+geo <- list(me = 3, var = 1, geomod = "Exp", anis = c(90, 1), range = 6, nugget = 0)
+trueK <- random2d(nsim = 1, grid = grid, geo = geo)
+Plotparameter2d(trueK, iflog = TRUE)
+```
+
+## Well layout
+
+Wells are placed at grid-cell centres 3, 5, 7 in both x and y, giving
+9 wells on a regular 3&times;3 grid.
+
+```{r well_layout}
+# Grid-cell centres: (cell_num - 0.5) * cell_width
+well_coords <- expand.grid(x = c(2.5, 4.5, 6.5), y = c(2.5, 4.5, 6.5))
+well_names <- paste0("W", 1:9)
+well_coords$well <- well_names
+print(well_coords)
+```
+
+## Build pumping and observation lists
+
+For each of the 9 wells, we create one pumping-test entry and one observation
+entry containing all other 8 wells.
+
+```{r build_qHT_oHT}
+TT <- trueK[, -c(1, 2)]
+
+qHT <- list()
+oHT <- list()
+
+for (i in 1:9) {
+  test_name <- paste0("test_W", i)
+
+  # Pumping well i
+  Qinf <- data.frame(
+    Qp = 10,               # pumping rate [L3/T]
+    xp = well_coords$x[i],
+    yp = well_coords$y[i]
+  )
+
+  # Observation: all wells except the pumping one
+  obs_wells <- well_coords[-i, ]
+  Oinf <- data.frame(
+    data = NA,
+    x    = obs_wells$x,
+    y    = obs_wells$y
+  )
+
+  qHT[[test_name]] <- Qinf
+  oHT[[test_name]] <- Oinf
+}
+```
+
+## Simulate steady-state drawdown
+
+We run a steady-state forward simulation for each pumping test using the true
+transmissivity field, then sample the drawdown at observation locations.
+
+```{r simulate_drawdown}
+for (i in 1:9) {
+  Qinf <- qHT[[i]]
+  trueh <- Fsteady2dsim(TT = TT, Qinf = Qinf, grid = grid)$solution
+  oinf <- oHT[[i]]
+  oinf <- samData(grid = grid, Oinf = oinf, h = trueh)
+  oHT[[i]] <- oinf[, c("data", "x", "y")]
+}
+
+# Quick summary of synthetic drawdowns
+dfoHT <- do.call(rbind, oHT)
+print(paste("Drawdown range:", round(min(-dfoHT$data), 4),
+            "to", round(max(-dfoHT$data), 4),
+            "  mean =", round(mean(-dfoHT$data), 4)))
+```
+
+## Package data object
+
+The `HTdata` list bundles the true field, pumping configuration, observations,
+and grid into a single object that can be stored in the package.
+
+```{r save_data, eval=FALSE}
+ht9_synthetic <- list(trueK = trueK, qHT = qHT, oHT = oHT, grid = grid)
+# usethis::use_data(ht9_synthetic, overwrite = TRUE)
+```
+
+## Inversion (no noise)
+
+We perform ensemble-smoother-based Bayesian inversion using first 5 pumping tests.
+With 9 tests on a small 9 * 9 grid, convergence is rapid.
+
+```{r inversion_clean, cache=TRUE}
+n = 9
+result <- Finverse(
+  grid   = grid,
+  qHT    = qHT[1:n],
+  oHT    = oHT[1:n],
+  nsim   = 200,
+  itermax = 10,
+  lrw    = 160000,
+  decay  = 2
+)
+```
+
+```{r plot_inversion_clean}
+inversePlot(niterm = 10, grid = grid, iterdf = result, oHT = oHT[1:n], trueK = trueK)
+```

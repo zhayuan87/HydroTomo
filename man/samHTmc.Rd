@@ -36,11 +36,11 @@ one ensemble member and columns are observed heads concatenated across all
 pumping tests.
 }
 \examples{
-domain=c(80,80,0,80,0,80)
-grid <- GenGrid(domain=domain)
+data("ht9_synthetic")
+grid <- ht9_synthetic$grid
+oHT <- ht9_synthetic$oHT
+qHT <- ht9_synthetic$qHT
 TT= random2d(nsim=10,grid=grid)
 TT = TT[,-c(1,2)]
-data("oHT")
-data("qHT")
 da = samHTmc(grid =grid, TT=TT, qHT= qHT, oHT=oHT,lrw=320000)
 }

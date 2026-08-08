@@ -1,4 +1,4 @@
-﻿#' 2D Ensemble-based Bayesian inversion for hydraulic tomography (serial)
+﻿#' 2D Ensemble-based Bayesian inversion for hydraulic tomography
 #'
 #' Performs ensemble-smoother-based Bayesian inversion to estimate the 2D
 #' log-transmissivity field \eqn{\ln T(\mathbf{x})} from hydraulic tomography
@@ -13,46 +13,27 @@
 #' applied to the diagonal of \eqn{\mathbf{C}_{hh}} and decays by a factor
 #' \code{decay} each iteration.
 #'
-#' This version uses serial \code{lapply} for forward simulations.  For
-#' parallel execution see \code{\link{Finverse3}}.
+#' This version uses the \pkg{foreach} + \pkg{doParallel} framework
+#' (\code{\%dopar\%}) for parallel forward simulations across ensemble members.
 #'
-#' @param domain a 6-element vector \code{c(nx, ny, x1, x2, y1, y2)}.  \code{nx}
-#'   and \code{ny} are cell counts; \code{x1:x2} and \code{y1:y2} are domain
-#'   extents \code{[L]}.
-#' @param grid grid list from \code{GenGrid()}; generated from \code{domain} if
-#'   \code{NULL}.
-#' @param qHT list of pumping test data frames, each with columns \code{Qp}
-#'   \code{[L\eqn{^3}/T]}, \code{x} \code{[L]}, \code{y} \code{[L]}.
-#' @param nsim ensemble size (number of realisations).  Default 50; use smaller
-#'   values for testing.
+#' @param domain a 6-element vector \code{c(nx, ny, x1, x2, y1, y2)} \code{[L]}.
+#' @param grid grid list from \code{GenGrid()}.
+#' @param qHT list of pumping test data frames (\code{Qp, x, y}).
+#' @param nsim ensemble size (default 50).
 #' @param itermax maximum number of iterations.
-#' @param varmeanTmax convergence threshold on the spatial variance of mean
-#'   ln(T).  Iteration stops when this variance exceeds the threshold.
-#' @param rmsemin minimum weighted RMSE stopping criterion.  Iteration stops
-#'   when RMSE falls below this value.
-#' @param mul stabiliser coefficient (default 1.0).  Added to the diagonal of
-#'   the head covariance matrix to improve numerical stability.  The value
-#'   decays by \code{decay} each iteration.
-#' @param decay stabiliser decay factor per iteration (default 1.05).
-#'   \code{mul <- mul / decay} at the end of each iteration.
-#' @param oHT list of observation data frames, each with columns \code{data}
-#'   \code{[L]}, \code{x} \code{[L]}, \code{y} \code{[L]}.
-#' @param lrw integer, the length of the real work array for \code{steady.2D}.
-#'   Default 160000; increase for larger grids.
-#' @param geo prior geostatistical parameters — same list structure as
-#'   \code{random2d()}: \code{list(me, var, geomod, anis, range, nugget)}.
-#'   \code{me} and \code{var} are the mean and variance of ln(T);
-#'   \code{geomod} is the variogram model type (e.g. \code{"Exp"});
-#'   \code{anis} is \code{c(azimuth_deg, ratio)}; \code{range} is the
-#'   correlation range \code{[L]}; \code{nugget} is the nugget variance.
-#' @param ifcor    logical; if \code{TRUE}, returns the ensemble results after
-#'   the first iteration without performing the update. Useful for checking#'   forward simulations before running the full inversion.
+#' @param varmeanTmax convergence threshold on variance of mean ln(T).
+#' @param rmsemin minimum RMSE stopping criterion.
+#' @param mul stabiliser coefficient (default 1.0).
+#' @param decay stabiliser decay factor (default 1.05).
+#' @param oHT list of observation data frames (\code{data, x, y}).
+#' @param lrw real work array length for \code{steady.2D} (default 160000).
+#' @param ncore integer, the number of CPU cores for parallel execution
+#'   (default 10).
+#' @param geo prior geostatistical parameters: \code{list(me, var, geomod, anis, range, nugget)}.
 #' @return A list of per-iteration results, each element a list with
 #'   \code{meanT} (mean ln(T) vector), \code{varT} (variance of ln(T)),
 #'   \code{meanobsh} (mean simulated head), \code{varobsh} (variance of
-#'   simulated head).  When \code{ifcor = TRUE}, returns list with
-#'   \code{obsh} (simulated heads), \code{Tnew} (ensemble), and
-#'   \code{meanobsh}.
+#'   simulated head).
 #' @export
 #' @examples
 #' set.seed(100)
@@ -92,450 +73,16 @@ Finverse <- function(
     decay = 1.05,
     oHT= list(data.frame(data=-1,x=11,y=11)),
     lrw=160000,
-    geo=list(me=0,var=1,geomod="Exp",anis=c(90,1),range=30,nugget=0), # should be list since multiple pumping test.
-    ifcor = FALSE) {
-
-  #1. ----- before iteration (generating ensemble.....)----------
-  set.seed(200)
-  ### record the time so to see how long it takes.
-  startTime <- Sys.time()
-  if(is.null(grid))grid = GenGrid(domain)
-
-  #nsim = 50
-  nHT <- length(qHT) # number of pumping test.also list length of oHT.
-  trueobshHT <- list()
-  loc_obsHT <- list()
-  for (i in 1:nHT){
-    oinf <- oHT[[i]]
-    oelemdf <- getOelem(domain = domain,grid = grid,Oinf = oinf)
-    loc_obsHT[[i]] <- oelemdf$nelem
-    trueobshHT[[i]] <- oinf$data
-  }
-  trueobsh <- unlist(trueobshHT) # the data format in HT is a list.
-  nobs <- length(trueobsh)
-
-  yy <- random2d(nsim=nsim,grid = grid, geo = geo)
-  # initial ensemble.
-  Tnew <- yy[,-c(1,2)]
-  # nelem*nsim
-  ### get the variance map of Tnew.
-  ### this should goes with iterations.
-  niter <- 1
-  varmeanT <- 0
-  rmse <- 1e10
-  #itermax <- 100
-  #varmeanTmax <- 5
-  #rmsemin <- 0
-  #mul <- 1.0 # stablizer.
-  msgdf <- data.frame(niter = niter,varmeanT=varmeanT, rmse=rmse)
-  iterdf <- list()
-  #1. ----- before iteration----------0.94 0.00 0.94 (blh_synthetic)
-  # start of the itertion loop.
-  while(niter<=itermax & varmeanT<varmeanTmax & rmse>rmsemin){
-  #2. -----------get the obsh......------
-     varT <- apply(log(Tnew),1,var)
-    meanT <- apply(log(Tnew),1,mean)
-    varmeanT = var(meanT)
-    # from Tnew to h.
-
-    # hHT <- list()
-    # for (j in 1:nHT){
-    #   Qinf <- qHT[[j]]  # the information of jth pumping test.
-    #   h <- Fsteady2dsim(TT=Tnew[,1],Qinf=Qinf)$solution
-    #   for(i in 2:nsim){
-    #   h <- rbind(h,Fsteady2dsim(TT=Tnew[,i],Qinf=Qinf)$solution)
-    #   }
-    #   # h: nsim*nelem
-    #   obsh<- h[,loc_obsHT[[j]]]
-    #   hHT[[j]] <- obsh # store the j th pumping test observations.
-    # }
-    ### upgrade to parallel computing...........
-     # require(parallel)
-     # n = parallel::detectCores() - 1
-     # print(paste("using cores of ", n))
-     # cl = parallel::makeCluster(n)
-
-    hHT <- lapply(1:nHT, function(j) {
-      Qinf <- qHT[[j]]
-      # 使用 lapply 生成所有模拟结果
-       h_list <- lapply(1:nsim, function(i){
-         tmp = Fsteady2dsim(grid = grid, TT = Tnew[, i], Qinf = Qinf,lrw=lrw)$solution
-         index = loc_obsHT[[j]]
-         tmp[index]
-       })
-
-
-      # https://hansekbrand.se/code/clusterExport.html
-      ## it seems parallel package has some problem for local variable broadcasting.
-      #  clusterExport(cl,varlist = c("Fsteady2dsim"))
-      #  clusterExport(cl,varlist = c("nsim","grid","Qinf","Tnew",'lrw'))
-      #   h_list <- parLapply(cl,1:nsim, function(i){
-      #     tmp = Fsteady2dsim(grid = grid, TT = Tnew[, i], Qinf = Qinf,lrw=lrw)$solution
-      #     index = loc_obsHT[[j]]
-      #     tmp[index]
-      #   }
-      #   )
-      # 一次性合并所有结果
-      h_matrix <- do.call(rbind, h_list)
-    })
-
-    # Stop the cluster
-    # stopCluster(cl)
-    # obsh: nsim*nobs
-    if(nHT>1) obsh <- do.call("cbind",hHT) else obsh <- hHT[[1]]
-  #2. -----------get the obsh......------10.51  0.41 10.97
-
-    # get the head variance for each observation.
-  #3. ----------- get the covh and covhk..............
-    varobsh <- apply(obsh,2,var)
-    meanobsh <- apply(obsh,2,mean)
-
-    # get the misfit.
-    weigs <- 1/varobsh/sum(1/varobsh)
-    rmse <- mean((trueobsh - meanobsh)^2*weigs)^0.5
-    l2 <- mean((trueobsh - meanobsh)^2)^0.5
-    l1 <- mean(abs(trueobsh - meanobsh))
-
-    # get the covariance of h and h-T
-    # covh <- cov(obsh)
-    # data = list(obsh,t(log(Tnew)))
-    # # notice it is lnK rather than K.
-    # cc <- function(obsh,TT){
-    #   covhk = cov(obsh,TT)
-    # }
-    # covhk = suppressWarnings(multiApply::Apply(data,target_dims = list(1,1),cc))
-    #3. ----------- get the covh and covhk.............. blh 37.38  0.05 37.46
-    ## we now update the covariance calculation method.
-    # obsh --- n_ensemble * n_obs.
-    covh = cov(obsh) # the default is y = x
-    # covh n_obs*n_obs
-    tmpy = t(log(Tnew))
-    covhk = cov(obsh,tmpy)
-    if (ifcor) {
-      print("ifcor = TRUE: returning cross-covariance covhk.")
-      return(covhk)
-    }
-    # add stablizer term.
-    #4. ----------- solve covh ..............
-    covh1 <- covh
-    #diag(covh1) <-  (1+mul)*diag(covh)
-    diag(covh1) <-  rep((1+mul)*max(diag(covh)),nobs)
-    #### now we need to invert the covariance function and get the covh-1* %*% covhf
-    #a = solve(covh1,covhk[[1]])
-    a = solve(covh1,covhk)
-    # a in nobs*nelem
-
-    ### now we update the k value based on the difference between obs. and sim.
-    for(i in 1:nsim){
-      Tnew[,i] <- Tnew[,i] *  exp( t(a) %*% (trueobsh - obsh[i,]))
-    }
-
-    msg <- paste('niter =', niter,
-                 'varmeanT=', round(varmeanT,4),
-                 'rmse=',round(rmse,4),
-                 "l2=",round(l2,4),
-                 "l1=",round(l1,4))
-    msgdf <- rbind(msgdf,c(niter,varmeanT,rmse))
-    #4. ----------- solve covh ..............0.42 0.07 0.49
-    print(msg)
-    ### we need to store the iteration data.
-    iterdf[[niter]] <- list(meanT = as.vector(meanT), varT = as.vector(varT), meanobsh = meanobsh, varobsh = varobsh)
-    if(niter == 1){
-      et = Sys.time()
-      print(" -------------------The Computational time for one iteration--------- ")
-      print( difftime(et,startTime))
-      print(" -------------------The Computational time for one iteration--------- ")
-    }
-    niter <- niter + 1
-    mul <- mul/decay
-
-    ### iteration over time.
-  }
-  endTime <- Sys.time()
-  # get the time in seconds or mins.
-  print("-------------------The Computational--------- ")
-  print(difftime(endTime,startTime))
-  print("-------------------The Computational--------- ")
-  return(iterdf)
-}
-
-
-#' 2D Ensemble-based Bayesian inversion for hydraulic tomography (foreach serial)
-#'
-#' Variant of \code{\link{Finverse}} that uses the \pkg{foreach} framework
-#' (\code{\%do\%}) for forward simulations instead of \code{lapply}.  The
-#' Bayesian updating algorithm is identical to \code{Finverse}.  See
-#' \code{\link{Finverse}} for the full algorithm description and parameter
-#' documentation.
-#'
-#' @param domain a 6-element vector \code{c(nx, ny, x1, x2, y1, y2)} \code{[L]}.
-#' @param grid grid list from \code{GenGrid()}.
-#' @param qHT list of pumping test data frames (\code{Qp, x, y}).
-#' @param nsim ensemble size (default 50).
-#' @param itermax maximum number of iterations.
-#' @param varmeanTmax convergence threshold on variance of mean ln(T).
-#' @param rmsemin minimum RMSE stopping criterion.
-#' @param mul stabiliser coefficient (default 1.0).
-#' @param decay stabiliser decay factor (default 1.05).
-#' @param oHT list of observation data frames (\code{data, x, y}).
-#' @param lrw real work array length for \code{steady.2D} (default 160000).
-#' @param geo prior geostatistical parameters: \code{list(me, var, geomod, anis, range, nugget)}.
-#' @return A list of per-iteration results (see \code{\link{Finverse}}).
-#' @export
-#' @examples
-#' set.seed(100)
-#' trueK <- random2d(nsim=1)
-#' TT <- trueK[,-c(1,2)]
-#' domain=c(40,40,0,40,0,40)
-#' grid = GenGrid(domain)
-#' Qinf1=data.frame(Qp=10,xp=20.5,yp=20.5)
-#' qHT <- list(test1 = Qinf1)
-#' trueh <- Fsteady2dsim(TT=TT,Qinf=Qinf1,domain=domain)
-#' locx = c(15,18,22,25,30)
-#' locy = c(15,18,22,25,30)
-#' loc= expand.grid(x=locx,y=locy)
-#' Oinf1 <- data.frame(data=NA,x=loc$x,y=loc$y)
-#' Oinf1 <- samData(grid = grid,Oinf = Oinf1,h=trueh$solution)
-#' oHT <- list(test1 = Oinf1)
-#' result <- Finverse2(grid =grid, qHT = qHT, oHT = oHT)
-#' inversePlot(niterm=5,iterdf = result,oHT = oHT,trueK=trueK,grid=grid)
-#' Qinf2=data.frame(Qp=10,xp=10.5,yp=10.5)
-#' trueh2 <- Fsteady2dsim(TT=TT,Qinf=Qinf2,domain=domain)
-#' Oinf2 <- Oinf1
-#' Oinf2 <- samData(grid = grid,Oinf = Oinf2,h=trueh2$solution)
-#' oHT <- list(test1 = Oinf1,test2 = Oinf2)
-#' qHT <- list(test1 = Qinf1,test2 = Qinf2)
-#' result <- Finverse2(grid =grid, qHT = qHT, oHT = oHT)
-#' inversePlot(niterm=5,iterdf = result,oHT = oHT,trueK=trueK,grid=grid)
-
-Finverse2 <- function(
-    domain=c(40,40,0,40,0,40),
-    grid = NULL,
-    qHT=list(data.frame(Qp=10,x=20.5,y=20.5)), # should be list since it is HT.
-    nsim=50,
-    itermax=5,
-    varmeanTmax =5,
-    rmsemin = 0,
-    mul=1.0,
-    decay = 1.05,
-    oHT= list(data.frame(data=-1,x=11,y=11)),
-    lrw=160000,
-    geo=list(me=0,var=1,geomod="Exp",anis=c(90,1),range=30,nugget=0), # should be list since multiple pumping test.
-    ifcor = FALSE)
-{
-  #1. ----- before iteration (generating ensemble.....)----------
-  set.seed(200)
-  ### record the time so to see how long it takes.
-  startTime <- Sys.time()
-  if(is.null(grid))grid = GenGrid(domain)
-
-  #nsim = 50
-  nHT <- length(qHT) # number of pumping test.also list length of oHT.
-  # create the ij grid.
-  library('foreach')
-  #isim = 1:nsim
-  #jHT = 1: nHT
-  #ij = expand.grid(isim = isim, jHT = jHT)
-  trueobshHT <- list()
-  loc_obsHT <- list()
-  for (i in 1:nHT){
-    oinf <- oHT[[i]]
-    oelemdf <- getOelem(domain = domain,grid = grid,Oinf = oinf)
-    loc_obsHT[[i]] <- oelemdf$nelem
-    trueobshHT[[i]] <- oinf$data
-  }
-  trueobsh <- unlist(trueobshHT) # the data format in HT is a list.
-  nobs <- length(trueobsh)
-
-  yy <- random2d(nsim=nsim,grid = grid, geo = geo)
-  # initial ensemble.
-  Tnew <- yy[,-c(1,2)]
-  # nelem*nsim
-  ### get the variance map of Tnew.
-  ### this should goes with iterations.
-  niter <- 1
-  varmeanT <- 0
-  rmse <- 1e10
-  #itermax <- 100
-  #varmeanTmax <- 5
-  #rmsemin <- 0
-  #mul <- 1.0 # stablizer.
-  msgdf <- data.frame(niter = niter,varmeanT=varmeanT, rmse=rmse)
-  iterdf <- list()
-  #1. ----- before iteration----------0.94 0.00 0.94 (blh_synthetic)
-  # start of the itertion loop.
-  while(niter<=itermax & varmeanT<varmeanTmax & rmse>rmsemin){
-    #2. -----------get the obsh......------
-    varT <- apply(log(Tnew),1,var)
-    meanT <- apply(log(Tnew),1,mean)
-    varmeanT = var(meanT)
-
-# for each test and each nsim, simulate.
-
-    hHT <- lapply(1:nHT, function(j) {
-      Qinf <- qHT[[j]]
-      # 使用 lapply 生成所有模拟结果
-      h_mat <- foreach(i= 1:nsim,.combine=rbind) %do% {
-        tmp = Fsteady2dsim(grid = grid, TT = Tnew[, i], Qinf = Qinf,lrw=lrw)$solution
-        index = loc_obsHT[[j]]
-        tmp[index]
-      }
-    })
-
-    # Stop the cluster
-    # stopCluster(cl)
-    # obsh: nsim*nobs
-    if(nHT>1) obsh <- do.call("cbind",hHT) else obsh <- hHT[[1]]
-    #2. -----------get the obsh......------10.51  0.41 10.97
-
-    # get the head variance for each observation.
-    #3. ----------- get the covh and covhk..............
-    varobsh <- apply(obsh,2,var)
-    meanobsh <- apply(obsh,2,mean)
-    # get the misfit.
-    weigs <- 1/varobsh/sum(1/varobsh)
-    rmse <- mean((trueobsh - meanobsh)^2*weigs)^0.5
-    l2 <- mean((trueobsh - meanobsh)^2)^0.5
-    l1 <- mean(abs(trueobsh - meanobsh))
-
-    ## we now update the covariance calculation method.
-    # obsh --- n_ensemble * n_obs.
-    covh = cov(obsh) # the default is y = x
-    # covh n_obs*n_obs
-    tmpy = t(log(Tnew))
-    covhk = cov(obsh,tmpy)
-    if (ifcor) {
-      print("ifcor = TRUE: returning cross-covariance covhk.")
-      return(covhk)
-    }
-    # add stablizer term.
-    #4. ----------- solve covh ..............
-    covh1 <- covh
-    #diag(covh1) <-  (1+mul)*diag(covh)
-    diag(covh1) <-  rep((1+mul)*max(diag(covh)),nobs)
-    #### now we need to invert the covariance function and get the covh-1* %*% covhf
-    #a = solve(covh1,covhk[[1]])
-    a = solve(covh1,covhk)
-    # a in nobs*nelem
-
-    ### now we update the k value based on the difference between obs. and sim.
-    for(i in 1:nsim){
-      Tnew[,i] <- Tnew[,i] *  exp( t(a) %*% (trueobsh - obsh[i,]))
-    }
-
-    msg <- paste('niter =', niter,
-                 'varmeanT=', round(varmeanT,4),
-                 'rmse=',round(rmse,4),
-                 "l2=",round(l2,4),
-                 "l1=",round(l1,4))
-    msgdf <- rbind(msgdf,c(niter,varmeanT,rmse))
-    #4. ----------- solve covh ..............0.42 0.07 0.49
-    print(msg)
-    ### we need to store the iteration data.
-    iterdf[[niter]] <- list(meanT = as.vector(meanT), varT = as.vector(varT), meanobsh = meanobsh, varobsh = varobsh)
-    if(niter == 1){
-      et = Sys.time()
-      print(" -------------------The Computational time for one iteration--------- ")
-      print( difftime(et,startTime))
-      print(" -------------------The Computational time for one iteration--------- ")
-    }
-    niter <- niter + 1
-    mul <- mul/decay
-
-    ### iteration over time.
-  }
-  endTime <- Sys.time()
-  # get the time in seconds or mins.
-  print("-------------------The Computational--------- ")
-  print(difftime(endTime,startTime))
-  print("-------------------The Computational--------- ")
-  return(iterdf)
-}
-
-
-
-
-
-#' 2D Ensemble-based Bayesian inversion for hydraulic tomography (parallel)
-#'
-#' Variant of \code{\link{Finverse}} that uses the \pkg{foreach} +
-#' \pkg{doParallel} framework (\code{\%dopar\%}) for parallel forward
-#' simulations across ensemble members.  The Bayesian updating algorithm is
-#' identical to \code{Finverse}.  See \code{\link{Finverse}} for the full
-#' algorithm description.
-#'
-#' @param domain a 6-element vector \code{c(nx, ny, x1, x2, y1, y2)} \code{[L]}.
-#' @param grid grid list from \code{GenGrid()}.
-#' @param qHT list of pumping test data frames (\code{Qp, x, y}).
-#' @param nsim ensemble size (default 50).
-#' @param itermax maximum number of iterations.
-#' @param varmeanTmax convergence threshold on variance of mean ln(T).
-#' @param rmsemin minimum RMSE stopping criterion.
-#' @param mul stabiliser coefficient (default 1.0).
-#' @param decay stabiliser decay factor (default 1.05).
-#' @param oHT list of observation data frames (\code{data, x, y}).
-#' @param lrw real work array length for \code{steady.2D} (default 160000).
-#' @param ncore integer, the number of CPU cores for parallel execution
-#'   (default 10).
-#' @param geo prior geostatistical parameters: \code{list(me, var, geomod, anis, range, nugget)}.
-#' @return A list of per-iteration results (see \code{\link{Finverse}}).
-#' @export
-#' @examples
-#' set.seed(100)
-#' trueK <- random2d(nsim=1)
-#' TT <- trueK[,-c(1,2)]
-#' domain=c(40,40,0,40,0,40)
-#' grid = GenGrid(domain)
-#' Qinf1=data.frame(Qp=10,xp=20.5,yp=20.5)
-#' qHT <- list(test1 = Qinf1)
-#' trueh <- Fsteady2dsim(TT=TT,Qinf=Qinf1,domain=domain)
-#' locx = c(15,18,22,25,30)
-#' locy = c(15,18,22,25,30)
-#' loc= expand.grid(x=locx,y=locy)
-#' Oinf1 <- data.frame(data=NA,x=loc$x,y=loc$y)
-#' Oinf1 <- samData(grid = grid,Oinf = Oinf1,h=trueh$solution)
-#' oHT <- list(test1 = Oinf1)
-#' result <- Finverse3(grid =grid, qHT = qHT, oHT = oHT)
-#' inversePlot(niterm=5,iterdf = result,oHT = oHT,trueK=trueK,grid=grid)
-#' Qinf2=data.frame(Qp=10,xp=10.5,yp=10.5)
-#' trueh2 <- Fsteady2dsim(TT=TT,Qinf=Qinf2,domain=domain)
-#' Oinf2 <- Oinf1
-#' Oinf2 <- samData(grid = grid,Oinf = Oinf2,h=trueh2$solution)
-#' oHT <- list(test1 = Oinf1,test2 = Oinf2)
-#' qHT <- list(test1 = Qinf1,test2 = Qinf2)
-#' result <- Finverse3(grid =grid, qHT = qHT, oHT = oHT)
-#' inversePlot(niterm=5,iterdf = result,oHT = oHT,trueK=trueK,grid=grid)
-
-Finverse3 <- function(
-    domain=c(40,40,0,40,0,40),
-    grid = NULL,
-    qHT=list(data.frame(Qp=10,x=20.5,y=20.5)), # should be list since it is HT.
-    nsim=50,
-    itermax=5,
-    varmeanTmax =5,
-    rmsemin = 0,
-    mul=1.0,
-    decay = 1.05,
-    oHT= list(data.frame(data=-1,x=11,y=11)),
-    lrw=160000,
     ncore =10,
     geo=list(me=0,var=1,geomod="Exp",anis=c(90,1),range=30,nugget=0), # should be list since multiple pumping test.
     ifcor = FALSE)
 {
   #1. ----- before iteration (generating ensemble.....)----------
-  set.seed(200)
   ### record the time so to see how long it takes.
   startTime <- Sys.time()
   if(is.null(grid))grid = GenGrid(domain)
 
-  #nsim = 50
   nHT <- length(qHT) # number of pumping test.also list length of oHT.
-  # create the ij grid.
-  library('foreach')
-  library("doParallel")
-  #isim = 1:nsim
-  #jHT = 1: nHT
-  #ij = expand.grid(isim = isim, jHT = jHT)
   trueobshHT <- list()
   loc_obsHT <- list()
   for (i in 1:nHT){
@@ -548,37 +95,45 @@ Finverse3 <- function(
   nobs <- length(trueobsh)
 
   yy <- random2d(nsim=nsim,grid = grid, geo = geo)
-  # initial ensemble.
-  Tnew <- yy[,-c(1,2)]
-  # nelem*nsim
-  ### get the variance map of Tnew.
-  ### this should goes with iterations.
+  # initial ensemble: matrix (nsim columns, n_elem rows)
+  Tnew <- as.matrix(yy[,-c(1,2)])
+
+  ## ---- register parallel backend once for all iterations ----
+  cl <- parallel::makeCluster(ncore)
+  doParallel::registerDoParallel(cl)
+  on.exit(parallel::stopCluster(cl), add = TRUE)
+
+  setupTime <- difftime(Sys.time(), startTime, units = "secs")
+  message(sprintf("[setup] %.2f s (grid + ensemble + %d-core cluster)", 
+                  as.numeric(setupTime), ncore))
+
   niter <- 1
   varmeanT <- 0
   rmse <- 1e10
-  #itermax <- 100
-  #varmeanTmax <- 5
-  #rmsemin <- 0
-  #mul <- 1.0 # stablizer.
-  msgdf <- data.frame(niter = niter,varmeanT=varmeanT, rmse=rmse)
   iterdf <- list()
-  #1. ----- before iteration----------0.94 0.00 0.94 (blh_synthetic)
-  # start of the itertion loop.
-  while(niter<=itermax & varmeanT<varmeanTmax & rmse>rmsemin){
+  loopStart <- Sys.time()
+  # start of the iteration loop.
+  while(isTRUE(niter<=itermax & varmeanT<varmeanTmax & rmse>rmsemin)){
+    iter_start <- Sys.time()
+
     #2. -----------get the obsh......------
-    varT <- apply(log(Tnew),1,var)
-    meanT <- apply(log(Tnew),1,mean)
+    lnTnew <- log(Tnew)
+    meanT  <- rowMeans(lnTnew)
+    varT   <- rowMeans(lnTnew^2) - meanT^2
+    varT   <- varT * nsim / max(nsim - 1, 1)  # bias-corrected variance
     varmeanT = var(meanT)
 
     # for each test and each nsim, simulate.
+    t_forward <- Sys.time()
     obsh = samHTmcPar(grid =grid, TT=Tnew, qHT= qHT, oHT=oHT,lrw=lrw,ncore =ncore)
-
-    #2. -----------get the obsh......------10.51  0.41 10.97
+    t_forward <- difftime(Sys.time(), t_forward, units = "secs")
 
     # get the head variance for each observation.
     #3. ----------- get the covh and covhk..............
     varobsh <- apply(obsh,2,var)
     meanobsh <- apply(obsh,2,mean)
+    # add small epsilon to avoid division by zero
+    varobsh <- pmax(varobsh, .Machine$double.eps)
     # get the misfit.
     weigs <- 1/varobsh/sum(1/varobsh)
     rmse <- mean((trueobsh - meanobsh)^2*weigs)^0.5
@@ -586,10 +141,8 @@ Finverse3 <- function(
     l1 <- mean(abs(trueobsh - meanobsh))
 
     ## we now update the covariance calculation method.
-    # obsh --- n_ensemble * n_obs.
-    covh = cov(obsh) # the default is y = x
-    # covh n_obs*n_obs
-    tmpy = t(log(Tnew))
+    covh = cov(obsh)
+    tmpy = t(lnTnew)
     covhk = cov(obsh,tmpy)
     if (ifcor) {
       print("ifcor = TRUE: returning cross-covariance covhk.")
@@ -598,44 +151,32 @@ Finverse3 <- function(
     # add stablizer term.
     #4. ----------- solve covh ..............
     covh1 <- covh
-    #diag(covh1) <-  (1+mul)*diag(covh)
     diag(covh1) <-  rep((1+mul)*max(diag(covh)),nobs)
-    #### now we need to invert the covariance function and get the covh-1* %*% covhf
-    #a = solve(covh1,covhk[[1]])
     a = solve(covh1,covhk)
-    # a in nobs*nelem
 
-    ### now we update the k value based on the difference between obs. and sim.
-    for(i in 1:nsim){
-      Tnew[,i] <- Tnew[,i] *  exp( t(a) %*% (trueobsh - obsh[i,]))
-    }
+    ### vectorized ensemble update (replaces serial for-loop)
+    delta <- matrix(trueobsh, nrow = nobs, ncol = nsim) - t(obsh)
+    Tnew <- Tnew * exp(t(a) %*% delta)
 
-    msg <- paste('niter =', niter,
-                 'varmeanT=', round(varmeanT,4),
-                 'rmse=',round(rmse,4),
-                 "l2=",round(l2,4),
-                 "l1=",round(l1,4))
-    msgdf <- rbind(msgdf,c(niter,varmeanT,rmse))
-    #4. ----------- solve covh ..............0.42 0.07 0.49
-    print(msg)
+    iter_elapsed <- difftime(Sys.time(), iter_start, units = "secs")
+
+    msg <- sprintf("[iter %2d] varMeanT=%7.4f  rmse=%7.4f  L2=%7.4f  L1=%7.4f  |  total=%5.1fs  forward=%5.1fs",
+                   niter, round(varmeanT,4), round(rmse,4),
+                   round(l2,4), round(l1,4),
+                   as.numeric(iter_elapsed), as.numeric(t_forward))
+    message(msg)
     ### we need to store the iteration data.
     iterdf[[niter]] <- list(meanT = as.vector(meanT), varT = as.vector(varT), meanobsh = meanobsh, varobsh = varobsh)
-    if(niter == 1){
-      et = Sys.time()
-      print(" -------------------The Computational time for one iteration--------- ")
-      print( difftime(et,startTime))
-      print(" -------------------The Computational time for one iteration--------- ")
-    }
     niter <- niter + 1
     mul <- mul/decay
-
-    ### iteration over time.
   }
-  endTime <- Sys.time()
-  # get the time in seconds or mins.
-  print("-------------------The Computational--------- ")
-  print(difftime(endTime,startTime))
-  print("-------------------The Computational--------- ")
+  loopTime  <- difftime(Sys.time(), loopStart, units = "secs")
+  totalTime <- difftime(Sys.time(), startTime,  units = "secs")
+  niters    <- niter - 1
+  message(sprintf("[done] %d iterations | loop: %.1f s (avg %.1f s/iter) | total: %.1f s",
+                  niters, as.numeric(loopTime),
+                  as.numeric(loopTime) / max(niters, 1),
+                  as.numeric(totalTime)))
   return(iterdf)
 }
 
@@ -665,11 +206,11 @@ Finverse3 <- function(
 #'   \code{simplify = FALSE}).
 #' @export
 #' @examples
-#' domain=c(80,80,0,80,0,80)
-#' grid <- GenGrid(domain=domain)
+#' data("ht9_synthetic")
+#' grid <- ht9_synthetic$grid
+#' oHT <- ht9_synthetic$oHT
+#' qHT <- ht9_synthetic$qHT
 #' TT =0.1
-#' data("oHT")
-#' data("qHT")
 #' da = samHT(grid =grid, TT=TT, qHT= qHT, oHT=oHT,lrw=320000)
 samHT <- function(domain=c(40,40,0,40,0,40),
                    grid = NULL,
@@ -710,12 +251,12 @@ samHT <- function(domain=c(40,40,0,40,0,40),
 #' @return An \code{nsim × nobs} matrix of simulated heads at observation wells.
 #' @export
 #' @examples
-#' domain=c(80,80,0,80,0,80)
-#' grid <- GenGrid(domain=domain)
+#' data("ht9_synthetic")
+#' grid <- ht9_synthetic$grid
+#' oHT <- ht9_synthetic$oHT
+#' qHT <- ht9_synthetic$qHT
 #' TT= random2d(nsim=10,grid=grid)
 #' TT = TT[,-c(1,2)]
-#' data("oHT")
-#' data("qHT")
 #' da = samHTmc(grid =grid, TT=TT, qHT= qHT, oHT=oHT,lrw=320000)
 samHTmc <- function(domain=c(40,40,0,40,0,40),
                   grid = NULL,
@@ -725,10 +266,10 @@ samHTmc <- function(domain=c(40,40,0,40,0,40),
                   lrw = 160000
 
 ){
-  nsim = ncol(TT)
   library('foreach')
-  foreach(i =1:nsim,.combine = rbind) %do%{
-    samHT(grid =grid, TT=TT[,i], qHT= qHT, oHT=oHT,lrw=lrw)
+  nsim = ncol(TT)
+  foreach::foreach(i =1:nsim,.combine = rbind) %do%{
+    samHT(grid =grid, TT=TT[, i, drop = TRUE], qHT= qHT, oHT=oHT,lrw=lrw)
   }
 }
 
@@ -739,7 +280,12 @@ samHTmc <- function(domain=c(40,40,0,40,0,40),
 #' \pkg{foreach} + \pkg{doParallel} (\code{\%dopar\%}).  Returns a matrix
 #' where each row corresponds to one ensemble member and columns are observed
 #' heads concatenated across all pumping tests.  Used internally by
-#' \code{\link{Finverse3}}.
+#' \code{\link{Finverse}}.
+#'
+#' **Important:** A parallel backend must be registered
+#' (e.g. via \code{doParallel::registerDoParallel(cores = ncore)}) before
+#' calling this function.  \code{Finverse} sets up the backend automatically;
+#' standalone calls need explicit registration.
 #'
 #' @param domain a 6-element vector \code{c(nx, ny, x1, x2, y1, y2)} \code{[L]}.
 #' @param grid grid list from \code{GenGrid()}.
@@ -751,13 +297,16 @@ samHTmc <- function(domain=c(40,40,0,40,0,40),
 #' @return An \code{nsim × nobs} matrix of simulated heads at observation wells.
 #' @export
 #' @examples
-#' domain=c(80,80,0,80,0,80)
-#' grid <- GenGrid(domain=domain)
+#' data("ht9_synthetic")
+#' grid <- ht9_synthetic$grid
+#' oHT <- ht9_synthetic$oHT
+#' qHT <- ht9_synthetic$qHT
 #' TT= random2d(nsim=50,grid=grid)
 #' TT = TT[,-c(1,2)]
-#' data("oHT")
-#' data("qHT")
+#' cl <- parallel::makeCluster(10)
+#' doParallel::registerDoParallel(cl)
 #' da = samHTmcPar(grid =grid, TT=TT, qHT= qHT, oHT=oHT,lrw=320000,ncore=10)
+#' parallel::stopCluster(cl)
 samHTmcPar <- function(domain=c(40,40,0,40,0,40),
                     grid = NULL,
                     TT=0.1,
@@ -768,15 +317,11 @@ samHTmcPar <- function(domain=c(40,40,0,40,0,40),
 
 ){
   library('foreach')
-  library("doParallel")
-  registerDoParallel(cores=ncore)
+  library('doParallel')
   nsim = ncol(TT)
-  x <-foreach(i =1:nsim,.combine = rbind) %dopar%{
-    HydroTomo::samHT(grid =grid, TT=TT[,i], qHT= qHT, oHT=oHT,lrw=lrw)
+  x <- foreach::foreach(i =1:nsim,.combine = rbind) %dopar%{
+    HydroTomo::samHT(grid =grid, TT=TT[, i, drop = TRUE], qHT= qHT, oHT=oHT,lrw=lrw)
   }
-
-
-  stopImplicitCluster()
   return(x)
 }
 
@@ -865,7 +410,7 @@ samHTmcPar3D <- function(grid,
 
   nsim <- ncol(TT)
   x <- foreach(i = 1:nsim, .combine = rbind) %dopar% {
-    HydroTomo::samHT3D(grid = grid, TT = TT[, i],
+    HydroTomo::samHT3D(grid = grid, TT = TT[, i, drop = TRUE],
                        qHT = qHT, oHT = oHT, lrw = lrw)
   }
 
@@ -969,7 +514,7 @@ samHTmcPar3DScreen <- function(grid,
 
   nsim <- ncol(TT)
   x <- foreach(i = 1:nsim, .combine = rbind) %dopar% {
-    HydroTomo::samHT3DScreen(grid = grid, TT = TT[, i],
+    HydroTomo::samHT3DScreen(grid = grid, TT = TT[, i, drop = TRUE],
                              qHT = qHT, oHT = oHT, lrw = lrw)
   }
 
@@ -980,7 +525,7 @@ samHTmcPar3DScreen <- function(grid,
 
 #' 3D Ensemble-based Bayesian inverse for hydraulic tomography (parallel)
 #'
-#' 3D extension of \code{Finverse3}, replacing all 2D components (grid,
+#' 3D extension of \code{Finverse}, replacing all 2D components (grid,
 #' random field, forward solver, observation sampling) with their 3D
 #' counterparts.  The Bayesian updating equations are identical.
 #'
@@ -1856,7 +1401,7 @@ jacobian2D <- function(grid,
 #' log-transmissivity field \eqn{\ln T(\mathbf{x})} from hydraulic tomography
 #' (HT) data using the **adjoint-state method** to compute the Jacobian
 #' (sensitivity) matrix analytically, instead of using ensemble statistics
-#' as in the ESMDA-based \code{\link{Finverse3}}.
+#' as in the ESMDA-based \code{\link{Finverse}}.
 #'
 #' The update follows the quasi-linear Bayesian formulation:
 #' \deqn{\Delta \mathbf{m} = (\mathbf{J}^\top \mathbf{R}^{-1} \mathbf{J} +
@@ -1904,7 +1449,7 @@ jacobian2D <- function(grid,
 #'   \code{m}, \code{h_sim}, \code{rmse}, \code{l2}, \code{l1}, and
 #'   \code{J} (Jacobian, first iteration only).  The variable names
 #'   \code{meanT}, \code{varT}, \code{meanobsh}, and \code{varobsh} are kept
-#'   compatible with \code{\link{Finverse3}} so that \code{\link{inversePlot}}
+#'   compatible with \code{\link{Finverse}} so that \code{\link{inversePlot}}
 #'   can be used directly.  When \code{ifcor = TRUE}, returns
 #'   \code{list(J = J, h_sim = h_sim)}.
 #' @export
@@ -2056,7 +1601,7 @@ FinverseAdj <- function(
     T_current <- exp(m)
 
     # --- Store iteration results ---
-    # Use the same variable names as Finverse3 for compatibility with inversePlot
+    # Use the same variable names as Finverse for compatibility with inversePlot
     iterdf[[niter]] <- list(
       meanT    = as.vector(m),
       varT     = varT,
@@ -3217,7 +2762,7 @@ samHTmcParTr <- function(grid,
 
   nsim <- ncol(TT)
   x <- foreach(i = 1:nsim, .combine = rbind) %dopar% {
-    HydroTomo::samHTtr(grid = grid, TT = TT[, i], SS = SS,
+    HydroTomo::samHTtr(grid = grid, TT = TT[, i, drop = TRUE], SS = SS,
                        qHT = qHT, oHT = oHT, times = times, lrw = lrw)
   }
 
@@ -3228,7 +2773,7 @@ samHTmcParTr <- function(grid,
 
 #' 2D Transient Ensemble-based Bayesian inverse for hydraulic tomography (parallel)
 #'
-#' Transient extension of \code{Finverse3}.  Replaces the steady-state forward
+#' Transient extension of \code{Finverse}.  Replaces the steady-state forward
 #' solver with \code{Ftransient2dsim} and uses \code{samDataTr} for time-aware
 #' observation sampling.  The Bayesian updating equations (ensemble smoother)
 #' are identical to the steady-state version.
@@ -3276,9 +2821,9 @@ samHTmcParTr <- function(grid,
 #' Oinf1  <- data.frame(data=NA, x=loc$x, y=loc$y, time=0.5)
 #' Oinf1  <- samDataTr(Oinf=Oinf1, grid=grid, result_tr=res)
 #' oHT    <- list(test1 = Oinf1)
-#' result <- Finverse3Tr(grid=grid, qHT=qHT, oHT=oHT,
+#' result <- FinverseTr(grid=grid, qHT=qHT, oHT=oHT,
 #'                       SS=1e-4, times=times, nsim=20, itermax=1, ncore=2)
-Finverse3Tr <- function(
+FinverseTr <- function(
     domain      = c(40, 40, 0, 40, 0, 40),
     grid        = NULL,
     qHT         = list(data.frame(Qp=10, x=20.5, y=20.5)),
@@ -3488,7 +3033,7 @@ samHTmcPar3DTr <- function(grid,
 
   nsim <- ncol(KK)
   x <- foreach(i = 1:nsim, .combine = rbind) %dopar% {
-    HydroTomo::samHT3Dtr(grid = grid, KK = KK[, i], Ss = Ss,
+    HydroTomo::samHT3Dtr(grid = grid, KK = KK[, i, drop = TRUE], Ss = Ss,
                          qHT = qHT, oHT = oHT, times = times, lrw = lrw)
   }
 
@@ -3782,7 +3327,7 @@ samHTmcPar3DTrScreen <- function(grid,
 
   nsim <- ncol(KK)
   x <- foreach(i = 1:nsim, .combine = rbind) %dopar% {
-    HydroTomo::samHT3DtrScreen(grid = grid, KK = KK[, i], Ss = Ss,
+    HydroTomo::samHT3DtrScreen(grid = grid, KK = KK[, i, drop = TRUE], Ss = Ss,
                                qHT = qHT, oHT = oHT, times = times, lrw = lrw)
   }
 

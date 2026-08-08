@@ -1,5 +1,10 @@
 ---
 title: "HydroTomo"
+author:
+  - name: "Yuanyuan Zha"
+    affiliation: "Wuhan University"
+    email: "zhayuan87@whu.edu.cn"
+    orcid: "0000-0003-4323-0730"
 output: rmarkdown::html_vignette
 vignette: >
   %\VignetteIndexEntry{HydroTomo}
@@ -15,6 +20,38 @@ knitr::opts_chunk$set(
   fig.height=6
 )
 ```
+
+# Installation
+
+You can install the development version from GitHub:
+
+```{r install, eval=FALSE}
+# install.packages("devtools")
+# devtools::install_github("zhayuan87/HydroTomo")
+```
+
+# Package structure
+
+- **Forward modeling** — `Fsteady2dsim()`, `Fsteady3dsim()`, `Fsteady2dtrsim()`
+  *Simulate steady-state drawdown in 2D/3D confined aquifers under pumping tests.*
+
+- **Random field generation** — `random2d()`, `random3d()`
+  *Generate random hydraulic conductivity/transmissivity fields via geostatistical simulation.*
+
+- **Sampling** — `samData()`
+  *Extract simulated drawdown at observation well locations.*
+
+- **Sensitivity analysis** — `jacobian2D()`, `jacobian3D()`
+  *Compute Jacobian (sensitivity) matrices via the adjoint-state method.*
+
+- **Inversion** — `Finverse()`, `FinverseAdj()`, `Finverse2D()`, `Finverse3D()`
+  *Perform HT inversion using geostatistical or adjoint-based approaches.*
+
+- **Ensemble runs** — `samHT()`, `samHT3D()`, `samHTtr()`, `samHTmc()`, `samHTmcPar()`, `samHTmcPar3D()`
+  *Run forward simulations for a single realization or an ensemble (sequential or parallel).*
+
+- **Visualization** — `Plotsteady2d()`, `Plotsteady3d()`, `covhkPlot2D()`, `inversePlot()`, `HydroPlot()`
+  *Plot drawdown fields, cross-covariance maps, and inversion results.*
 
 # Background 
 
@@ -66,93 +103,4 @@ Oinf1 <- samData(grid = grid,Oinf = Oinf1,h=trueh$solution)
 oHT <- list(test1 = Oinf1)
 result <- Finverse(grid =grid, qHT = qHT, oHT = oHT)
 inversePlot(niterm=5,grid=grid,iterdf = result,oHT = oHT,trueK=trueK)
-```
-
-# Field studies
-
-Hydraulic tomography has been validated by many field studies. Now we give an example of using field data provided in the package to do forward simulation. The data was given by Xi'an Geological Surveying. The data contains 12 pumping tests conducted in an unconfined aquifer at Bulanghe River Basin near Yulin. The pumping test data and observation data are provided in the package as `qHT` and `oHT` datasets. Here we just show how to do forward simulation using the estimated transmissivity field provided in the package.
-
-
-```{r plot_blh}
-library(HydroTomo)
-data('qHT')
-
-domain=c(80,80,0,80,0,80)
-grid <- GenGrid(domain=domain)
-Qinf = qHT[[1]]
-s <- Fsteady2dsim(TT=50,Qinf=Qinf,grid=grid,lrw=320000)
-Plotsteady2d(s)
-```
-
-Now we can sample the data at observation locations and compare with observed data.
-
-```{r compare_blh}
-data('oHT')
-Oinf =oHT[[1]]
-Oinf2 = samData(Oinf=Oinf,grid=grid,h=s$solution)
-dfx = data.frame(obs = Oinf$data,sim=Oinf2$data)
-library(ggplot2)
-# make sure x, y are in the same range.
-datamin = min(c(dfx$obs,dfx$sim))
-datamax = max(c(dfx$obs,dfx$sim))
-p <- ggplot(dfx,aes(x=obs,y=sim))+
-  geom_point()+
-  geom_abline(slope=1,intercept=0,color='red')+
-  coord_cartesian(xlim = c(datamin, datamax), ylim = c(datamin, datamax))+
-  labs(title='Observed vs Simulated heads',x='Observed heads/m',y='Simulated heads/m')
-print(p)
-```
-
-
-It is find that if we use homogeneous field, the simulation results do not match the observed data well. The inversion process is expected to improve the estimation of transmissivity field and thus improve the simulation results.
-
-```{r inverse_blh}
-qHT1 = list(Qinf)
-oHT1 = list(Oinf)
-result <- Finverse(grid =grid, qHT = qHT1, oHT = oHT1,lrw=320000,itermax=10)
-p = inversePlot(niterm=6,grid=grid,iterdf = result,oHT = oHT1)
-p$lnk
-p$varlnk
-p$headscatter
-
-```
-
-Now we look at the pumping A1-2 which is still at the same location but with different pumping rate and observation data.
-
-```{r inverse_blh_a12}
-qHT1 = qHT[2]
-oHT1 = oHT[2]
-result <- Finverse(grid =grid, qHT = qHT1, oHT = oHT1,lrw=320000,itermax=10)
-p = inversePlot(niterm=5,grid=grid,iterdf = result,oHT = oHT1)
-p$lnk
-p$varlnk
-p$headscatter
-
-```
-
-
-Adding more tests may enhance the resolution of the inversion. Here is an example.
-
-```{r inverse_blh2,cache=T}
-qHT1 = qHT[1:2]
-oHT1 = oHT[1:2]
-result <- Finverse(grid =grid, qHT = qHT1, oHT = oHT1,lrw=320000,itermax=10)
-p = inversePlot(niterm=5,grid=grid,iterdf = result,oHT = oHT1)
-p$lnk
-p$varlnk
-p$headscatter
-
-```
-
-Adding more and more.
-
-```{r inverse_blh3,cache=T}
-qHT1 = qHT[c(1,3,5,7,9,11)]
-oHT1 = oHT[c(1,3,5,7,9,11)]
-result <- Finverse(grid =grid, qHT = qHT1, oHT = oHT1,lrw=320000,itermax=10)
-p = inversePlot(niterm=5,grid=grid,iterdf = result,oHT = oHT1)
-p$lnk
-p$varlnk
-p$headscatter
-
 ```

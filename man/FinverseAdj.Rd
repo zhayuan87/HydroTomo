@@ -70,7 +70,7 @@ only when \code{ifvarTh = TRUE}),
 \code{m}, \code{h_sim}, \code{rmse}, \code{l2}, \code{l1}, and
 \code{J} (Jacobian, first iteration only).  The variable names
 \code{meanT}, \code{varT}, \code{meanobsh}, and \code{varobsh} are kept
-compatible with \code{\link{Finverse3}} so that \code{\link{inversePlot}}
+compatible with \code{\link{Finverse}} so that \code{\link{inversePlot}}
 can be used directly.  When \code{ifcor = TRUE}, returns
 \code{list(J = J, h_sim = h_sim)}.
 }
@@ -79,7 +79,7 @@ Performs deterministic Bayesian inversion to estimate the 2D
 log-transmissivity field \eqn{\ln T(\mathbf{x})} from hydraulic tomography
 (HT) data using the \strong{adjoint-state method} to compute the Jacobian
 (sensitivity) matrix analytically, instead of using ensemble statistics
-as in the ESMDA-based \code{\link{Finverse3}}.
+as in the ESMDA-based \code{\link{Finverse}}.
 }
 \details{
 The update follows the quasi-linear Bayesian formulation:

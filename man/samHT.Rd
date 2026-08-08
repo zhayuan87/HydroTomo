@@ -45,10 +45,10 @@ test in \code{qHT} and samples the simulated heads at the observation
 locations given in \code{oHT}.  Used internally by the inversion functions.
 }
 \examples{
-domain=c(80,80,0,80,0,80)
-grid <- GenGrid(domain=domain)
+data("ht9_synthetic")
+grid <- ht9_synthetic$grid
+oHT <- ht9_synthetic$oHT
+qHT <- ht9_synthetic$qHT
 TT =0.1
-data("oHT")
-data("qHT")
 da = samHT(grid =grid, TT=TT, qHT= qHT, oHT=oHT,lrw=320000)
 }

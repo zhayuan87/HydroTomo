@@ -31,8 +31,7 @@ inversePlot(
 
 \item{grid}{grid list from \code{GenGrid()}.}
 
-\item{iterdf}{list returned by \code{Finverse()}, \code{Finverse2()}, or
-\code{Finverse3()}.}
+\item{iterdf}{list returned by \code{Finverse()}.}
 
 \item{oHT}{list of observation data frames used in the inversion (columns
 \code{data, x, y}).}

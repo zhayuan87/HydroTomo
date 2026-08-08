@@ -127,8 +127,7 @@ Plotparameter2d <- function(TT, palette="viridis",plotshow = TRUE,
 #'
 #' @param niterm iteration number to visualise (index into \code{iterdf}).
 #' @param grid grid list from \code{GenGrid()}.
-#' @param iterdf list returned by \code{Finverse()}, \code{Finverse2()}, or
-#'   \code{Finverse3()}.
+#' @param iterdf list returned by \code{Finverse()}.
 #' @param oHT list of observation data frames used in the inversion (columns
 #'   \code{data, x, y}).
 #' @param trueK (optional) the true transmissivity field from
@@ -930,7 +929,7 @@ PlotTr3d <- function(result_tr,
 #' Plot cross-covariance (sensitivity) map for a single 2D observation
 #'
 #' Given a \code{covhk} matrix returned by any parallel 2D inversion function
-#' (e.g. \code{Finverse3}, \code{Finverse3Tr}) with \code{ifcor = TRUE}, this
+#' (e.g. \code{Finverse}, \code{FinverseTr}) with \code{ifcor = TRUE}, this
 #' function plots the cross-covariance between one selected observation's head
 #' and the log-transmissivity at every grid cell.  Use \code{+ geom_point()} /
 #' \code{geom_text()} externally to overlay well locations.
@@ -950,7 +949,7 @@ PlotTr3d <- function(result_tr,
 #' @export
 #' @examples
 #' \dontrun{
-#' covhk <- Finverse3(grid = grid, qHT = qHT, oHT = oHT, ifcor = TRUE)
+#' covhk <- Finverse(grid = grid, qHT = qHT, oHT = oHT, ifcor = TRUE)
 #' covhkPlot2D(covhk, grid, iobs = 1)
 #' }
 covhkPlot2D <- function(covhk,

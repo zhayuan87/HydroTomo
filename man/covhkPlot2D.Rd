@@ -44,14 +44,14 @@ A \code{ggplot} object.
 }
 \description{
 Given a \code{covhk} matrix returned by any parallel 2D inversion function
-(e.g. \code{Finverse3}, \code{Finverse3Tr}) with \code{ifcor = TRUE}, this
+(e.g. \code{Finverse}, \code{FinverseTr}) with \code{ifcor = TRUE}, this
 function plots the cross-covariance between one selected observation's head
 and the log-transmissivity at every grid cell.  Use \code{+ geom_point()} /
 \code{geom_text()} externally to overlay well locations.
 }
 \examples{
 \dontrun{
-covhk <- Finverse3(grid = grid, qHT = qHT, oHT = oHT, ifcor = TRUE)
+covhk <- Finverse(grid = grid, qHT = qHT, oHT = oHT, ifcor = TRUE)
 covhkPlot2D(covhk, grid, iobs = 1)
 }
 }

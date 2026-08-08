@@ -69,7 +69,7 @@ list with \code{obsh} (simulated heads), \code{Tnew} (ensemble), and
 \code{meanobsh}.
 }
 \description{
-3D extension of \code{Finverse3}, replacing all 2D components (grid,
+3D extension of \code{Finverse}, replacing all 2D components (grid,
 random field, forward solver, observation sampling) with their 3D
 counterparts.  The Bayesian updating equations are identical.
 }
