@@ -18,6 +18,7 @@ Finverse3DScreenAdj(
   geo = list(me = 0, var = 1, geomod = "Exp", range = 10, nugget = 0, anis = c(0, 0, 0,
     1, 1)),
   m0 = NULL,
+  ncore = 1,
   ifcor = FALSE,
   ifvarTh = FALSE
 )

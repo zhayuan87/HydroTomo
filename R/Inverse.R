@@ -2133,6 +2133,11 @@ jacobian2DTr <- function(grid,
 #' oHT <- list(test1 = Oinf1)
 #' result <- FinverseAdjTr(grid=grid, qHT=qHT, oHT=oHT, itermax=3)
 #' }
+#' 
+#' Todo list:
+#' Currently the function is much slower  than the MC version, and also its convergence is not as good as the MC version.
+#' Should try to speed up the code and improve the convergence.
+#' 
 FinverseAdjTr <- function(
     domain      = c(40, 40, 0, 40, 0, 40),
     grid        = NULL,
@@ -2152,6 +2157,7 @@ FinverseAdjTr <- function(
     geo         = list(me = 0, var = 1, geomod = "Exp",
                        anis = c(90, 1), range = 30, nugget = 0),
     m0          = NULL,
+    ncore       = 1,
     ifcor       = FALSE,
     ifvarTh     = FALSE) {
 
@@ -2215,16 +2221,34 @@ FinverseAdjTr <- function(
   }
   T_current <- exp(m)
 
+  ## ---- register parallel cluster for jacobian inner loop ----
+  if (ncore > 1) {
+    library('foreach')
+    library('doParallel')
+    cl <- parallel::makeCluster(ncore)
+    doParallel::registerDoParallel(cl)
+    on.exit(parallel::stopCluster(cl), add = TRUE)
+  }
+
+  setupTime <- difftime(Sys.time(), startTime, units = "secs")
+  message(sprintf("[setup] %.2f s (grid + C_kk + %d-core cluster)",
+                  as.numeric(setupTime), max(ncore, 1)))
+
   # ---- Iteration loop ----
   niter <- 1
   rmse <- 1e10
   iterdf <- list()
+  loopStart <- Sys.time()
 
   while (niter <= itermax && rmse > rmsemin) {
 
+    iter_start <- Sys.time()
+
     # --- Forward simulation at current T ---
+    t_forward <- Sys.time()
     h_sim_vec <- samHTtr(grid = grid, TT = T_current, SS = SS,
                          qHT = qHT, oHT = oHT, times = sim_times, lrw = lrw)
+    t_forward <- difftime(Sys.time(), t_forward, units = "secs")
 
     # --- Misfit ---
     residual <- trueobsh - h_sim_vec
@@ -2232,38 +2256,33 @@ FinverseAdjTr <- function(
     l2 <- rmse
     l1 <- mean(abs(residual))
 
-    msg <- paste('niter =', niter,
-                 'rmse =', round(rmse, 6),
-                 'l2 =', round(l2, 6),
-                 'l1 =', round(l1, 6),
-                 'lambda_lm =', round(lambda_lm, 4))
-    print(msg)
-
-    # --- Compute Jacobian ---
+    # --- Compute Jacobian (parallel adjoint solves per observation) ---
+    t_jac <- Sys.time()
     J <- jacobian2DTr(grid = grid, TT = T_current, SS = SS,
                       qHT = qHT, oHT = oHT,
                       times = sim_times, nconv = nconv, lrw = lrw)
+    t_jac <- difftime(Sys.time(), t_jac, units = "secs")
 
     if (ifcor) {
       covhk <- J %*% C_kk
-      print("ifcor = TRUE: returning cross-covariance covhk.")
+      message("ifcor = TRUE: returning cross-covariance covhk.")
       return(covhk)
     }
 
     # --- Compute update (dual / observation-space formulation) ---
-    Jt <- t(J)
-    JCJt <- J %*% C_kk %*% Jt
-    S_mat <- JCJt + (sigma2obs + lambda_lm) * diag(nobs)
+    Jt <- t(J)                                     # nelem x nobs
+    JCJt <- J %*% C_kk %*% Jt                      # nobs x nobs
+    S <- JCJt + (sigma2obs + lambda_lm) * diag(nobs)
 
-    beta <- solve(S_mat, residual)
-    dm <- as.vector(C_kk %*% Jt %*% beta)
+    beta <- solve(S, residual)                     # nobs
+    dm <- as.vector(C_kk %*% Jt %*% beta)          # nelem
 
     # --- Estimate variances ---
     meanobsh <- h_sim_vec
 
     if (ifvarTh) {
-      KS <- C_kk %*% Jt %*% solve(S_mat)
-      C_post <- C_kk - KS %*% J %*% C_kk
+      KS <- C_kk %*% Jt %*% solve(S)               # nelem x nobs (Kalman-like gain)
+      C_post <- C_kk - KS %*% J %*% C_kk           # nelem x nelem
       varT <- as.vector(diag(C_post))
       JCJt_post <- J %*% C_post %*% Jt
       varobsh <- as.vector(diag(JCJt_post))
@@ -2276,6 +2295,9 @@ FinverseAdjTr <- function(
     m <- m + dm
     T_current <- exp(m)
 
+    # --- Spatial variance of log-T field (analogous to varMeanT in ensemble methods) ---
+    var_m <- var(as.vector(m))
+
     # --- Store iteration results ---
     iterdf[[niter]] <- list(
       meanT    = as.vector(m),
@@ -2286,21 +2308,33 @@ FinverseAdjTr <- function(
       h_sim    = h_sim_vec,
       rmse     = rmse,
       l2       = l2,
-      l1       = l1
+      l1       = l1,
+      var_m    = var_m
     )
 
     if (niter == 1) {
       iterdf[[niter]]$J <- J
-      print("--- time for one iteration ---")
-      print(difftime(Sys.time(), startTime))
     }
+
+    iter_elapsed <- difftime(Sys.time(), iter_start, units = "secs")
+
+    msg <- sprintf("[iter %2d] L2=%7.4f  L1=%7.4f  var_m=%7.4f  lambda=%7.4f  |  total=%5.1fs  forward=%5.1fs  jacob=%5.1fs",
+                   niter, round(l2, 4), round(l1, 4), round(var_m, 4),
+                   round(lambda_lm, 4),
+                   as.numeric(iter_elapsed), as.numeric(t_forward), as.numeric(t_jac))
+    message(msg)
 
     niter <- niter + 1
     lambda_lm <- lambda_lm / decay_lm
   }
 
-  print("--- total time ---")
-  print(difftime(Sys.time(), startTime))
+  loopTime  <- difftime(Sys.time(), loopStart, units = "secs")
+  totalTime <- difftime(Sys.time(), startTime,  units = "secs")
+  niters    <- niter - 1
+  message(sprintf("[done] %d iterations | loop: %.1f s (avg %.1f s/iter) | total: %.1f s",
+                  niters, as.numeric(loopTime),
+                  as.numeric(loopTime) / max(niters, 1),
+                  as.numeric(totalTime)))
   return(iterdf)
 }
 
@@ -2383,6 +2417,7 @@ Finverse3DAdj <- function(
                        range = 10, nugget = 0,
                        anis = c(0, 0, 0, 1, 1)),
     m0          = NULL,
+    ncore       = 1,
     ifcor       = FALSE,
     ifvarTh     = FALSE) {
 
@@ -2435,16 +2470,34 @@ Finverse3DAdj <- function(
   }
   K_current <- exp(m)
 
+  ## ---- register parallel cluster for jacobian inner loop ----
+  if (ncore > 1) {
+    library('foreach')
+    library('doParallel')
+    cl <- parallel::makeCluster(ncore)
+    doParallel::registerDoParallel(cl)
+    on.exit(parallel::stopCluster(cl), add = TRUE)
+  }
+
+  setupTime <- difftime(Sys.time(), startTime, units = "secs")
+  message(sprintf("[setup] %.2f s (grid + C_kk + %d-core cluster)",
+                  as.numeric(setupTime), max(ncore, 1)))
+
   # ---- Iteration loop ----
   niter <- 1
   rmse <- 1e10
   iterdf <- list()
+  loopStart <- Sys.time()
 
   while (niter <= itermax && rmse > rmsemin) {
 
+    iter_start <- Sys.time()
+
     # --- Forward simulation at current K ---
+    t_forward <- Sys.time()
     h_sim_vec <- samHT3D(grid = grid, TT = K_current,
                          qHT = qHT, oHT = oHT, lrw = lrw)
+    t_forward <- difftime(Sys.time(), t_forward, units = "secs")
 
     # --- Misfit ---
     residual <- trueobsh - h_sim_vec
@@ -2452,20 +2505,15 @@ Finverse3DAdj <- function(
     l2 <- rmse
     l1 <- mean(abs(residual))
 
-    msg <- paste('niter =', niter,
-                 'rmse =', round(rmse, 6),
-                 'l2 =', round(l2, 6),
-                 'l1 =', round(l1, 6),
-                 'lambda_lm =', round(lambda_lm, 4))
-    print(msg)
-
-    # --- Compute Jacobian ---
+    # --- Compute Jacobian (parallel adjoint solves per observation) ---
+    t_jac <- Sys.time()
     J <- jacobian3D(grid = grid, KK = K_current,
                     qHT = qHT, oHT = oHT, lrw = lrw)
+    t_jac <- difftime(Sys.time(), t_jac, units = "secs")
 
     if (ifcor) {
       covhk <- J %*% C_kk
-      print("ifcor = TRUE: returning cross-covariance covhk.")
+      message("ifcor = TRUE: returning cross-covariance covhk.")
       return(covhk)
     }
 
@@ -2481,13 +2529,11 @@ Finverse3DAdj <- function(
     meanobsh <- h_sim_vec
 
     if (ifvarTh) {
-      # Predicted head variance = diag(J C_kk J^T)
-      varobsh <- as.vector(diag(JCJt))
-
-      # Conditional (posterior) parameter covariance
-      KS <- C_kk %*% Jt %*% solve(S)               # nelem x nobs
+      KS <- C_kk %*% Jt %*% solve(S)               # nelem x nobs (Kalman-like gain)
       C_post <- C_kk - KS %*% J %*% C_kk           # nelem x nelem
       varT <- as.vector(diag(C_post))
+      JCJt_post <- J %*% C_post %*% Jt
+      varobsh <- as.vector(diag(JCJt_post))
     } else {
       varT <- NULL
       varobsh <- NULL
@@ -2496,6 +2542,9 @@ Finverse3DAdj <- function(
     # --- Update parameters ---
     m <- m + dm
     K_current <- exp(m)
+
+    # --- Spatial variance of log-K field (analogous to varMeanT in ensemble methods) ---
+    var_m <- var(as.vector(m))
 
     # --- Store iteration results ---
     iterdf[[niter]] <- list(
@@ -2507,21 +2556,33 @@ Finverse3DAdj <- function(
       h_sim    = h_sim_vec,
       rmse     = rmse,
       l2       = l2,
-      l1       = l1
+      l1       = l1,
+      var_m    = var_m
     )
 
     if (niter == 1) {
       iterdf[[niter]]$J <- J
-      print("--- time for one iteration ---")
-      print(difftime(Sys.time(), startTime))
     }
+
+    iter_elapsed <- difftime(Sys.time(), iter_start, units = "secs")
+
+    msg <- sprintf("[iter %2d] L2=%7.4f  L1=%7.4f  var_m=%7.4f  lambda=%7.4f  |  total=%5.1fs  forward=%5.1fs  jacob=%5.1fs",
+                   niter, round(l2, 4), round(l1, 4), round(var_m, 4),
+                   round(lambda_lm, 4),
+                   as.numeric(iter_elapsed), as.numeric(t_forward), as.numeric(t_jac))
+    message(msg)
 
     niter <- niter + 1
     lambda_lm <- lambda_lm / decay_lm
   }
 
-  print("--- total time ---")
-  print(difftime(Sys.time(), startTime))
+  loopTime  <- difftime(Sys.time(), loopStart, units = "secs")
+  totalTime <- difftime(Sys.time(), startTime,  units = "secs")
+  niters    <- niter - 1
+  message(sprintf("[done] %d iterations | loop: %.1f s (avg %.1f s/iter) | total: %.1f s",
+                  niters, as.numeric(loopTime),
+                  as.numeric(loopTime) / max(niters, 1),
+                  as.numeric(totalTime)))
   return(iterdf)
 }
 
@@ -2598,6 +2659,7 @@ Finverse3DScreenAdj <- function(
                        range = 10, nugget = 0,
                        anis = c(0, 0, 0, 1, 1)),
     m0          = NULL,
+    ncore       = 1,
     ifcor       = FALSE,
     ifvarTh     = FALSE) {
 
@@ -2647,16 +2709,34 @@ Finverse3DScreenAdj <- function(
   }
   K_current <- exp(m)
 
+  ## ---- register parallel cluster for jacobian inner loop ----
+  if (ncore > 1) {
+    library('foreach')
+    library('doParallel')
+    cl <- parallel::makeCluster(ncore)
+    doParallel::registerDoParallel(cl)
+    on.exit(parallel::stopCluster(cl), add = TRUE)
+  }
+
+  setupTime <- difftime(Sys.time(), startTime, units = "secs")
+  message(sprintf("[setup] %.2f s (grid + C_kk + %d-core cluster)",
+                  as.numeric(setupTime), max(ncore, 1)))
+
   # ---- Iteration loop ----
   niter <- 1
   rmse <- 1e10
   iterdf <- list()
+  loopStart <- Sys.time()
 
   while (niter <= itermax && rmse > rmsemin) {
 
+    iter_start <- Sys.time()
+
     # --- Forward simulation at current K (screen-averaged) ---
+    t_forward <- Sys.time()
     h_sim_vec <- samHT3DScreen(grid = grid, TT = K_current,
                                qHT = qHT, oHT = oHT, lrw = lrw)
+    t_forward <- difftime(Sys.time(), t_forward, units = "secs")
 
     # --- Misfit ---
     residual <- trueobsh - h_sim_vec
@@ -2664,20 +2744,15 @@ Finverse3DScreenAdj <- function(
     l2 <- rmse
     l1 <- mean(abs(residual))
 
-    msg <- paste('niter =', niter,
-                 'rmse =', round(rmse, 6),
-                 'l2 =', round(l2, 6),
-                 'l1 =', round(l1, 6),
-                 'lambda_lm =', round(lambda_lm, 4))
-    print(msg)
-
-    # --- Compute Jacobian (screen-averaged) ---
+    # --- Compute Jacobian (screen-averaged, parallel adjoint solves) ---
+    t_jac <- Sys.time()
     J <- jacobian3DScreen(grid = grid, KK = K_current,
                           qHT = qHT, oHT = oHT, lrw = lrw)
+    t_jac <- difftime(Sys.time(), t_jac, units = "secs")
 
     if (ifcor) {
       covhk <- J %*% C_kk
-      print("ifcor = TRUE: returning cross-covariance covhk.")
+      message("ifcor = TRUE: returning cross-covariance covhk.")
       return(covhk)
     }
 
@@ -2693,11 +2768,11 @@ Finverse3DScreenAdj <- function(
     meanobsh <- h_sim_vec
 
     if (ifvarTh) {
-      varobsh <- as.vector(diag(JCJt))
-
-      KS <- C_kk %*% Jt %*% solve(S)
-      C_post <- C_kk - KS %*% J %*% C_kk
+      KS <- C_kk %*% Jt %*% solve(S)               # nelem x nobs (Kalman-like gain)
+      C_post <- C_kk - KS %*% J %*% C_kk           # nelem x nelem
       varT <- as.vector(diag(C_post))
+      JCJt_post <- J %*% C_post %*% Jt
+      varobsh <- as.vector(diag(JCJt_post))
     } else {
       varT <- NULL
       varobsh <- NULL
@@ -2706,6 +2781,9 @@ Finverse3DScreenAdj <- function(
     # --- Update parameters ---
     m <- m + dm
     K_current <- exp(m)
+
+    # --- Spatial variance of log-K field (analogous to varMeanT in ensemble methods) ---
+    var_m <- var(as.vector(m))
 
     # --- Store iteration results ---
     iterdf[[niter]] <- list(
@@ -2717,21 +2795,33 @@ Finverse3DScreenAdj <- function(
       h_sim    = h_sim_vec,
       rmse     = rmse,
       l2       = l2,
-      l1       = l1
+      l1       = l1,
+      var_m    = var_m
     )
 
     if (niter == 1) {
       iterdf[[niter]]$J <- J
-      print("--- time for one iteration ---")
-      print(difftime(Sys.time(), startTime))
     }
+
+    iter_elapsed <- difftime(Sys.time(), iter_start, units = "secs")
+
+    msg <- sprintf("[iter %2d] L2=%7.4f  L1=%7.4f  var_m=%7.4f  lambda=%7.4f  |  total=%5.1fs  forward=%5.1fs  jacob=%5.1fs",
+                   niter, round(l2, 4), round(l1, 4), round(var_m, 4),
+                   round(lambda_lm, 4),
+                   as.numeric(iter_elapsed), as.numeric(t_forward), as.numeric(t_jac))
+    message(msg)
 
     niter <- niter + 1
     lambda_lm <- lambda_lm / decay_lm
   }
 
-  print("--- total time ---")
-  print(difftime(Sys.time(), startTime))
+  loopTime  <- difftime(Sys.time(), loopStart, units = "secs")
+  totalTime <- difftime(Sys.time(), startTime,  units = "secs")
+  niters    <- niter - 1
+  message(sprintf("[done] %d iterations | loop: %.1f s (avg %.1f s/iter) | total: %.1f s",
+                  niters, as.numeric(loopTime),
+                  as.numeric(loopTime) / max(niters, 1),
+                  as.numeric(totalTime)))
   return(iterdf)
 }
 

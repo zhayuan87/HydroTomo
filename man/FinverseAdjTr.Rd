@@ -22,6 +22,7 @@ FinverseAdjTr(
   decay_lm = 2,
   geo = list(me = 0, var = 1, geomod = "Exp", anis = c(90, 1), range = 30, nugget = 0),
   m0 = NULL,
+  ncore = 1,
   ifcor = FALSE,
   ifvarTh = FALSE
 )
@@ -67,16 +68,16 @@ by \code{decay_lm} each iteration.}
 \item{m0}{initial log-T field, length \code{n} vector.  If \code{NULL}
 (default), uses the prior mean \code{geo$me} everywhere.}
 
+\item{ncore}{number of CPU cores for parallel adjoint solves (default 1).
+When \code{ncore > 1} and there are multiple observation wells, the
+inner loop of \code{\link{jacobian2D}} (adjoint solve per observation)
+is parallelized via \pkg{foreach} + \pkg{doParallel}.}
+
 \item{ifcor}{logical; if \code{TRUE}, returns the Jacobian matrix and
 forward response after the first iteration without performing the update.}
 
 \item{ifvarTh}{logical; if \code{TRUE}, computes and stores \code{varobsh}
 and \code{varT}.  Default \code{FALSE}.}
-
-\item{ncore}{number of CPU cores for parallel adjoint solves (default 1).
-When \code{ncore > 1} and there are multiple observation wells, the
-inner loop of \code{\link{jacobian2D}} (adjoint solve per observation)
-is parallelized via \pkg{foreach} + \pkg{doParallel}.}
 }
 \value{
 A list of per-iteration results (same structure as \code{\link{FinverseAdj}}).
@@ -109,4 +110,9 @@ Oinf1 <- samDataTr(Oinf=Oinf1, grid=grid, result_tr=res_fwd)
 oHT <- list(test1 = Oinf1)
 result <- FinverseAdjTr(grid=grid, qHT=qHT, oHT=oHT, itermax=3)
 }
+
+Todo list:
+Currently the function is much slower  than the MC version, and also its convergence is not as good as the MC version.
+Should try to speed up the code and improve the convergence.
+
 }
