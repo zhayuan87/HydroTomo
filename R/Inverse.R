@@ -406,7 +406,6 @@ samHTmcPar3D <- function(grid,
 
   library('foreach')
   library('doParallel')
-  registerDoParallel(cores = ncore)
 
   nsim <- ncol(TT)
   x <- foreach(i = 1:nsim, .combine = rbind) %dopar% {
@@ -414,7 +413,6 @@ samHTmcPar3D <- function(grid,
                        qHT = qHT, oHT = oHT, lrw = lrw)
   }
 
-  stopImplicitCluster()
   return(x)
 }
 
@@ -510,7 +508,6 @@ samHTmcPar3DScreen <- function(grid,
 
   library('foreach')
   library('doParallel')
-  registerDoParallel(cores = ncore)
 
   nsim <- ncol(TT)
   x <- foreach(i = 1:nsim, .combine = rbind) %dopar% {
@@ -518,7 +515,6 @@ samHTmcPar3DScreen <- function(grid,
                              qHT = qHT, oHT = oHT, lrw = lrw)
   }
 
-  stopImplicitCluster()
   return(x)
 }
 
@@ -615,30 +611,46 @@ Finverse3D <- function(
   yy   <- random3d(nsim = nsim, grid = grid, geo = geo)
   Tnew <- as.matrix(yy[, -c(1, 2, 3)])   # n × nsim matrix of K values
 
+  ## ---- register parallel backend once for all iterations ----
+  cl <- parallel::makeCluster(ncore)
+  doParallel::registerDoParallel(cl)
+  on.exit(parallel::stopCluster(cl), add = TRUE)
+
+  setupTime <- difftime(Sys.time(), startTime, units = "secs")
+  message(sprintf("[setup] %.2f s (grid + ensemble + %d-core cluster)",
+                  as.numeric(setupTime), ncore))
+
   # ---- iteration loop --------------------------------------------------------
   niter    <- 1
   varmeanT <- 0
   rmse     <- 1e10
-  msgdf    <- data.frame(niter = niter, varmeanT = varmeanT, rmse = rmse)
   iterdf   <- list()
+  loopStart <- Sys.time()
 
   while (niter <= itermax & varmeanT < varmeanTmax & rmse > rmsemin) {
 
-    varT     <- apply(log(Tnew), 1, var)
-    meanT    <- apply(log(Tnew), 1, mean)
+    iter_start <- Sys.time()
+
+    lnTnew <- log(Tnew)
+    meanT  <- rowMeans(lnTnew)
+    varT   <- rowMeans(lnTnew^2) - meanT^2
+    varT   <- varT * nsim / max(nsim - 1, 1)  # bias-corrected variance
     varmeanT <- var(meanT)
 
     # parallel forward runs for all ensemble members and pumping tests
+    t_forward <- Sys.time()
     obsh <- samHTmcPar3D(grid  = grid,
                          TT    = Tnew,
                          qHT   = qHT,
                          oHT   = oHT,
                          lrw   = lrw,
                          ncore = ncore)
+    t_forward <- difftime(Sys.time(), t_forward, units = "secs")
 
     # ---- statistics ----------------------------------------------------------
     varobsh  <- apply(obsh, 2, var)
     meanobsh <- apply(obsh, 2, mean)
+    varobsh  <- pmax(varobsh, .Machine$double.eps)
     weigs    <- 1 / varobsh / sum(1 / varobsh)
     rmse     <- mean((trueobsh - meanobsh)^2 * weigs)^0.5
     l2       <- mean((trueobsh - meanobsh)^2)^0.5
@@ -646,7 +658,7 @@ Finverse3D <- function(
 
     # ---- Bayesian update -----------------------------------------------------
     covh  <- cov(obsh)
-    covhk <- cov(obsh, t(log(Tnew)))
+    covhk <- cov(obsh, t(lnTnew))
     if (ifcor) {
       print("ifcor = TRUE: returning cross-covariance covhk.")
       return(covhk)
@@ -655,33 +667,34 @@ Finverse3D <- function(
     diag(covh1) <- rep((1 + mul) * max(diag(covh)), nobs)
     a <- solve(covh1, covhk)   # nobs × n
 
-    for (i in seq_len(nsim)) {
-      Tnew[, i] <- Tnew[, i] * exp(t(a) %*% (trueobsh - obsh[i, ]))
-    }
+    ### vectorized ensemble update (replaces serial for-loop)
+    delta <- matrix(trueobsh, nrow = nobs, ncol = nsim) - t(obsh)
+    Tnew <- Tnew * exp(t(a) %*% delta)
 
-    msg <- paste('niter =', niter,
-                 'varmeanT =', round(varmeanT, 4),
-                 'rmse =', round(rmse, 4),
-                 'l2 =', round(l2, 4),
-                 'l1 =', round(l1, 4))
-    print(msg)
+    iter_elapsed <- difftime(Sys.time(), iter_start, units = "secs")
+
+    msg <- sprintf("[iter %2d] varMeanT=%7.4f  rmse=%7.4f  L2=%7.4f  L1=%7.4f  |  total=%5.1fs  forward=%5.1fs",
+                   niter, round(varmeanT, 4), round(rmse, 4),
+                   round(l2, 4), round(l1, 4),
+                   as.numeric(iter_elapsed), as.numeric(t_forward))
+    message(msg)
 
     iterdf[[niter]] <- list(meanT    = as.vector(meanT),
                             varT     = as.vector(varT),
                             meanobsh = meanobsh,
                             varobsh  = varobsh)
 
-    if (niter == 1) {
-      print("--- time for one iteration ---")
-      print(difftime(Sys.time(), startTime))
-    }
-
     niter <- niter + 1
     mul   <- mul / decay
   }
 
-  print("--- total time ---")
-  print(difftime(Sys.time(), startTime))
+  loopTime  <- difftime(Sys.time(), loopStart, units = "secs")
+  totalTime <- difftime(Sys.time(), startTime,  units = "secs")
+  niters    <- niter - 1
+  message(sprintf("[done] %d iterations | loop: %.1f s (avg %.1f s/iter) | total: %.1f s",
+                  niters, as.numeric(loopTime),
+                  as.numeric(loopTime) / max(niters, 1),
+                  as.numeric(totalTime)))
   return(iterdf)
 }
 
@@ -776,30 +789,46 @@ Finverse3DScreen <- function(
   yy   <- random3d(nsim = nsim, grid = grid, geo = geo)
   Knew <- as.matrix(yy[, -c(1, 2, 3)])
 
+  ## ---- register parallel backend once for all iterations ----
+  cl <- parallel::makeCluster(ncore)
+  doParallel::registerDoParallel(cl)
+  on.exit(parallel::stopCluster(cl), add = TRUE)
+
+  setupTime <- difftime(Sys.time(), startTime, units = "secs")
+  message(sprintf("[setup] %.2f s (grid + ensemble + %d-core cluster)",
+                  as.numeric(setupTime), ncore))
+
   # ---- iteration loop --------------------------------------------------------
   niter    <- 1
   varmeanT <- 0
   rmse     <- 1e10
-  msgdf    <- data.frame(niter = niter, varmeanT = varmeanT, rmse = rmse)
   iterdf   <- list()
+  loopStart <- Sys.time()
 
   while (niter <= itermax & varmeanT < varmeanTmax & rmse > rmsemin) {
 
-    varT     <- apply(log(Knew), 1, var)
-    meanT    <- apply(log(Knew), 1, mean)
+    iter_start <- Sys.time()
+
+    lnKnew <- log(Knew)
+    meanT  <- rowMeans(lnKnew)
+    varT   <- rowMeans(lnKnew^2) - meanT^2
+    varT   <- varT * nsim / max(nsim - 1, 1)  # bias-corrected variance
     varmeanT <- var(meanT)
 
     # parallel steady forward runs — screen-averaged
+    t_forward <- Sys.time()
     obsh <- samHTmcPar3DScreen(grid  = grid,
                                TT    = Knew,
                                qHT   = qHT,
                                oHT   = oHT,
                                lrw   = lrw,
                                ncore = ncore)
+    t_forward <- difftime(Sys.time(), t_forward, units = "secs")
 
     # ---- statistics ----------------------------------------------------------
     varobsh  <- apply(obsh, 2, var)
     meanobsh <- apply(obsh, 2, mean)
+    varobsh  <- pmax(varobsh, .Machine$double.eps)
     weigs    <- 1 / varobsh / sum(1 / varobsh)
     rmse     <- mean((trueobsh - meanobsh)^2 * weigs)^0.5
     l2       <- mean((trueobsh - meanobsh)^2)^0.5
@@ -807,7 +836,7 @@ Finverse3DScreen <- function(
 
     # ---- Bayesian update -----------------------------------------------------
     covh  <- cov(obsh)
-    covhk <- cov(obsh, t(log(Knew)))
+    covhk <- cov(obsh, t(lnKnew))
     if (ifcor) {
       print("ifcor = TRUE: returning cross-covariance covhk.")
       return(covhk)
@@ -816,33 +845,34 @@ Finverse3DScreen <- function(
     diag(covh1) <- rep((1 + mul) * max(diag(covh)), nobs)
     a <- solve(covh1, covhk)
 
-    for (i in seq_len(nsim)) {
-      Knew[, i] <- Knew[, i] * exp(t(a) %*% (trueobsh - obsh[i, ]))
-    }
+    ### vectorized ensemble update (replaces serial for-loop)
+    delta <- matrix(trueobsh, nrow = nobs, ncol = nsim) - t(obsh)
+    Knew <- Knew * exp(t(a) %*% delta)
 
-    msg <- paste('niter =', niter,
-                 'varmeanT =', round(varmeanT, 4),
-                 'rmse =', round(rmse, 4),
-                 'l2 =', round(l2, 4),
-                 'l1 =', round(l1, 4))
-    print(msg)
+    iter_elapsed <- difftime(Sys.time(), iter_start, units = "secs")
+
+    msg <- sprintf("[iter %2d] varMeanT=%7.4f  rmse=%7.4f  L2=%7.4f  L1=%7.4f  |  total=%5.1fs  forward=%5.1fs",
+                   niter, round(varmeanT, 4), round(rmse, 4),
+                   round(l2, 4), round(l1, 4),
+                   as.numeric(iter_elapsed), as.numeric(t_forward))
+    message(msg)
 
     iterdf[[niter]] <- list(meanT    = as.vector(meanT),
                             varT     = as.vector(varT),
                             meanobsh = meanobsh,
                             varobsh  = varobsh)
 
-    if (niter == 1) {
-      print("--- time for one iteration ---")
-      print(difftime(Sys.time(), startTime))
-    }
-
     niter <- niter + 1
     mul   <- mul / decay
   }
 
-  print("--- total time ---")
-  print(difftime(Sys.time(), startTime))
+  loopTime  <- difftime(Sys.time(), loopStart, units = "secs")
+  totalTime <- difftime(Sys.time(), startTime,  units = "secs")
+  niters    <- niter - 1
+  message(sprintf("[done] %d iterations | loop: %.1f s (avg %.1f s/iter) | total: %.1f s",
+                  niters, as.numeric(loopTime),
+                  as.numeric(loopTime) / max(niters, 1),
+                  as.numeric(totalTime)))
   return(iterdf)
 }
 
@@ -1360,9 +1390,15 @@ jacobian2D <- function(grid,
     }
 
     # --- For each observation in this test, solve adjoint and compute sensitivity ---
-    for (i_local in seq_len(nlocal)) {
+    # Each observation's adjoint solve is independent — parallelize when backend available
+    library('foreach')
+    library('doParallel')
+    has_backend <- foreach::getDoParRegistered() && foreach::getDoParWorkers() > 1
+    `%op%` <- if (has_backend) `%dopar%` else `%do%`
+
+    J_rows <- foreach::foreach(i_local = seq_len(nlocal),
+                               .combine = rbind) %op% {
       iobs <- obs_elem[i_local]
-      global_row <- row_offset + i_local
 
       # Solve adjoint equation
       lambda <- adjoint2D(grid = grid, TT = Tp, iobs = iobs, lrw = lrw)
@@ -1385,8 +1421,10 @@ jacobian2D <- function(grid,
 
       # Sensitivity: J_{ik} = -T_k * (grad_h_k · grad_lambda_i_k) * dV
       grad_dot <- as.vector(dhdx * dldx + dhdy * dldy)
-      J[global_row, ] <- -Tp * grad_dot * dV
+      -Tp * grad_dot * dV
     }
+
+    J[row_offset + seq_len(nlocal), ] <- J_rows
 
     row_offset <- row_offset + nlocal
   }
@@ -1432,6 +1470,10 @@ jacobian2D <- function(grid,
 #'   \code{list(me, var, geomod, anis, range, nugget)}.
 #' @param m0       initial log-T field, length \code{n} vector.  If \code{NULL}
 #'   (default), uses the prior mean \code{geo$me} everywhere.
+#' @param ncore    number of CPU cores for parallel adjoint solves (default 1).
+#'   When \code{ncore > 1} and there are multiple observation wells, the
+#'   inner loop of \code{\link{jacobian2D}} (adjoint solve per observation)
+#'   is parallelized via \pkg{foreach} + \pkg{doParallel}.
 #' @param ifcor    logical; if \code{TRUE}, returns the Jacobian matrix and
 #'   forward response after the first iteration without performing the update.
 #' @param ifvarTh  logical; if \code{TRUE}, computes and stores the predicted
@@ -1485,6 +1527,7 @@ FinverseAdj <- function(
     geo         = list(me = 0, var = 1, geomod = "Exp",
                        anis = c(90, 1), range = 30, nugget = 0),
     m0          = NULL,
+    ncore       = 1,
     ifcor       = FALSE,
     ifvarTh     = FALSE) {
 
@@ -1537,16 +1580,34 @@ FinverseAdj <- function(
   }
   T_current <- exp(m)
 
+  ## ---- register parallel cluster for jacobian inner loop ----
+  if (ncore > 1) {
+    library('foreach')
+    library('doParallel')
+    cl <- parallel::makeCluster(ncore)
+    doParallel::registerDoParallel(cl)
+    on.exit(parallel::stopCluster(cl), add = TRUE)
+  }
+
+  setupTime <- difftime(Sys.time(), startTime, units = "secs")
+  message(sprintf("[setup] %.2f s (grid + C_kk + %d-core cluster)",
+                  as.numeric(setupTime), max(ncore, 1)))
+
   # ---- Iteration loop ----
   niter <- 1
   rmse <- 1e10
   iterdf <- list()
+  loopStart <- Sys.time()
 
   while (niter <= itermax && rmse > rmsemin) {
 
+    iter_start <- Sys.time()
+
     # --- Forward simulation at current T ---
+    t_forward <- Sys.time()
     h_sim_vec <- samHT(grid = grid, TT = T_current,
                        qHT = qHT, oHT = oHT, lrw = lrw)
+    t_forward <- difftime(Sys.time(), t_forward, units = "secs")
 
     # --- Misfit ---
     residual <- trueobsh - h_sim_vec
@@ -1554,20 +1615,15 @@ FinverseAdj <- function(
     l2 <- rmse
     l1 <- mean(abs(residual))
 
-    msg <- paste('niter =', niter,
-                 'rmse =', round(rmse, 6),
-                 'l2 =', round(l2, 6),
-                 'l1 =', round(l1, 6),
-                 'lambda_lm =', round(lambda_lm, 4))
-    print(msg)
-
-    # --- Compute Jacobian ---
+    # --- Compute Jacobian (parallel adjoint solves per observation) ---
+    t_jac <- Sys.time()
     J <- jacobian2D(grid = grid, TT = T_current,
                     qHT = qHT, oHT = oHT, lrw = lrw)
+    t_jac <- difftime(Sys.time(), t_jac, units = "secs")
 
     if (ifcor) {
       covhk <- J %*% C_kk
-      print("ifcor = TRUE: returning cross-covariance covhk.")
+      message("ifcor = TRUE: returning cross-covariance covhk.")
       return(covhk)
     }
 
@@ -1583,12 +1639,9 @@ FinverseAdj <- function(
     meanobsh <- h_sim_vec
 
     if (ifvarTh) {
-      # Conditional (posterior) parameter covariance: C_kk - C_kk J^T S^{-1} J C_kk
-      # (similar to kriging conditional variance; Yeh & Liu, 2000, eq. 4)
       KS <- C_kk %*% Jt %*% solve(S)               # nelem x nobs (Kalman-like gain)
       C_post <- C_kk - KS %*% J %*% C_kk           # nelem x nelem
       varT <- as.vector(diag(C_post))
-      # Predicted head variance = diag(J C_kk J^T)
       JCJt_post <- J %*% C_post %*% Jt
       varobsh <- as.vector(diag(JCJt_post))
     } else {
@@ -1600,8 +1653,10 @@ FinverseAdj <- function(
     m <- m + dm
     T_current <- exp(m)
 
+    # --- Spatial variance of log-T field (analogous to varMeanT in ensemble methods) ---
+    var_m <- var(as.vector(m))
+
     # --- Store iteration results ---
-    # Use the same variable names as Finverse for compatibility with inversePlot
     iterdf[[niter]] <- list(
       meanT    = as.vector(m),
       varT     = varT,
@@ -1611,21 +1666,33 @@ FinverseAdj <- function(
       h_sim    = h_sim_vec,
       rmse     = rmse,
       l2       = l2,
-      l1       = l1
+      l1       = l1,
+      var_m    = var_m
     )
 
     if (niter == 1) {
       iterdf[[niter]]$J <- J
-      print("--- time for one iteration ---")
-      print(difftime(Sys.time(), startTime))
     }
+
+    iter_elapsed <- difftime(Sys.time(), iter_start, units = "secs")
+
+    msg <- sprintf("[iter %2d] L2=%7.4f  L1=%7.4f  var_m=%7.4f  lambda=%7.4f  |  total=%5.1fs  forward=%5.1fs  jacob=%5.1fs",
+                   niter, round(l2, 4), round(l1, 4), round(var_m, 4),
+                   round(lambda_lm, 4),
+                   as.numeric(iter_elapsed), as.numeric(t_forward), as.numeric(t_jac))
+    message(msg)
 
     niter <- niter + 1
     lambda_lm <- lambda_lm / decay_lm
   }
 
-  print("--- total time ---")
-  print(difftime(Sys.time(), startTime))
+  loopTime  <- difftime(Sys.time(), loopStart, units = "secs")
+  totalTime <- difftime(Sys.time(), startTime,  units = "secs")
+  niters    <- niter - 1
+  message(sprintf("[done] %d iterations | loop: %.1f s (avg %.1f s/iter) | total: %.1f s",
+                  niters, as.numeric(loopTime),
+                  as.numeric(loopTime) / max(niters, 1),
+                  as.numeric(totalTime)))
   return(iterdf)
 }
 
@@ -2041,6 +2108,10 @@ jacobian2DTr <- function(grid,
 #'   \code{list(me, var, geomod, anis, range, nugget)}.
 #' @param m0       initial log-T field, length \code{n} vector.  If \code{NULL}
 #'   (default), uses the prior mean \code{geo$me} everywhere.
+#' @param ncore    number of CPU cores for parallel adjoint solves (default 1).
+#'   When \code{ncore > 1} and there are multiple observation wells, the
+#'   inner loop of \code{\link{jacobian2D}} (adjoint solve per observation)
+#'   is parallelized via \pkg{foreach} + \pkg{doParallel}.
 #' @param ifcor    logical; if \code{TRUE}, returns the Jacobian matrix and
 #'   forward response after the first iteration without performing the update.
 #' @param ifvarTh  logical; if \code{TRUE}, computes and stores \code{varobsh}
@@ -2758,7 +2829,6 @@ samHTmcParTr <- function(grid,
 
   library('foreach')
   library('doParallel')
-  registerDoParallel(cores = ncore)
 
   nsim <- ncol(TT)
   x <- foreach(i = 1:nsim, .combine = rbind) %dopar% {
@@ -2766,7 +2836,6 @@ samHTmcParTr <- function(grid,
                        qHT = qHT, oHT = oHT, times = times, lrw = lrw)
   }
 
-  stopImplicitCluster()
   return(x)
 }
 
@@ -2862,20 +2931,34 @@ FinverseTr <- function(
   yy   <- random2d(nsim = nsim, grid = grid, geo = geo)
   Tnew <- as.matrix(yy[, -c(1, 2)])   # n × nsim matrix of T values
 
+  ## ---- register parallel backend once for all iterations ----
+  cl <- parallel::makeCluster(ncore)
+  doParallel::registerDoParallel(cl)
+  on.exit(parallel::stopCluster(cl), add = TRUE)
+
+  setupTime <- difftime(Sys.time(), startTime, units = "secs")
+  message(sprintf("[setup] %.2f s (grid + ensemble + %d-core cluster)",
+                  as.numeric(setupTime), ncore))
+
   # ---- iteration loop --------------------------------------------------------
   niter    <- 1
   varmeanT <- 0
   rmse     <- 1e10
-  msgdf    <- data.frame(niter = niter, varmeanT = varmeanT, rmse = rmse)
   iterdf   <- list()
+  loopStart <- Sys.time()
 
   while (niter <= itermax & varmeanT < varmeanTmax & rmse > rmsemin) {
 
-    varT     <- apply(log(Tnew), 1, var)
-    meanT    <- apply(log(Tnew), 1, mean)
+    iter_start <- Sys.time()
+
+    lnTnew <- log(Tnew)
+    meanT  <- rowMeans(lnTnew)
+    varT   <- rowMeans(lnTnew^2) - meanT^2
+    varT   <- varT * nsim / max(nsim - 1, 1)  # bias-corrected variance
     varmeanT <- var(meanT)
 
     # parallel transient forward runs for all ensemble members
+    t_forward <- Sys.time()
     obsh <- samHTmcParTr(grid  = grid,
                          TT    = Tnew,
                          SS    = SS,
@@ -2884,18 +2967,20 @@ FinverseTr <- function(
                          times = times,
                          lrw   = lrw,
                          ncore = ncore)
+    t_forward <- difftime(Sys.time(), t_forward, units = "secs")
 
     # ---- statistics ----------------------------------------------------------
     varobsh  <- apply(obsh, 2, var)
     meanobsh <- apply(obsh, 2, mean)
+    varobsh  <- pmax(varobsh, .Machine$double.eps)
     weigs    <- 1 / varobsh / sum(1 / varobsh)
     rmse     <- mean((trueobsh - meanobsh)^2 * weigs)^0.5
     l2       <- mean((trueobsh - meanobsh)^2)^0.5
     l1       <- mean(abs(trueobsh - meanobsh))
 
-    # ---- Bayesian update (same as steady-state) ------------------------------
+    # ---- Bayesian update -----------------------------------------------------
     covh  <- cov(obsh)
-    covhk <- cov(obsh, t(log(Tnew)))
+    covhk <- cov(obsh, t(lnTnew))
     if (ifcor) {
       print("ifcor = TRUE: returning cross-covariance covhk.")
       return(covhk)
@@ -2904,33 +2989,34 @@ FinverseTr <- function(
     diag(covh1) <- rep((1 + mul) * max(diag(covh)), nobs)
     a <- solve(covh1, covhk)   # nobs × n
 
-    for (i in seq_len(nsim)) {
-      Tnew[, i] <- Tnew[, i] * exp(t(a) %*% (trueobsh - obsh[i, ]))
-    }
+    ### vectorized ensemble update (replaces serial for-loop)
+    delta <- matrix(trueobsh, nrow = nobs, ncol = nsim) - t(obsh)
+    Tnew <- Tnew * exp(t(a) %*% delta)
 
-    msg <- paste('niter =', niter,
-                 'varmeanT =', round(varmeanT, 4),
-                 'rmse =', round(rmse, 4),
-                 'l2 =', round(l2, 4),
-                 'l1 =', round(l1, 4))
-    print(msg)
+    iter_elapsed <- difftime(Sys.time(), iter_start, units = "secs")
+
+    msg <- sprintf("[iter %2d] varMeanT=%7.4f  rmse=%7.4f  L2=%7.4f  L1=%7.4f  |  total=%5.1fs  forward=%5.1fs",
+                   niter, round(varmeanT, 4), round(rmse, 4),
+                   round(l2, 4), round(l1, 4),
+                   as.numeric(iter_elapsed), as.numeric(t_forward))
+    message(msg)
 
     iterdf[[niter]] <- list(meanT    = as.vector(meanT),
                             varT     = as.vector(varT),
                             meanobsh = meanobsh,
                             varobsh  = varobsh)
 
-    if (niter == 1) {
-      print("--- time for one iteration ---")
-      print(difftime(Sys.time(), startTime))
-    }
-
     niter <- niter + 1
     mul   <- mul / decay
   }
 
-  print("--- total time ---")
-  print(difftime(Sys.time(), startTime))
+  loopTime  <- difftime(Sys.time(), loopStart, units = "secs")
+  totalTime <- difftime(Sys.time(), startTime,  units = "secs")
+  niters    <- niter - 1
+  message(sprintf("[done] %d iterations | loop: %.1f s (avg %.1f s/iter) | total: %.1f s",
+                  niters, as.numeric(loopTime),
+                  as.numeric(loopTime) / max(niters, 1),
+                  as.numeric(totalTime)))
   return(iterdf)
 }
 
@@ -3029,7 +3115,6 @@ samHTmcPar3DTr <- function(grid,
 
   library('foreach')
   library('doParallel')
-  registerDoParallel(cores = ncore)
 
   nsim <- ncol(KK)
   x <- foreach(i = 1:nsim, .combine = rbind) %dopar% {
@@ -3037,7 +3122,6 @@ samHTmcPar3DTr <- function(grid,
                          qHT = qHT, oHT = oHT, times = times, lrw = lrw)
   }
 
-  stopImplicitCluster()
   return(x)
 }
 
@@ -3140,20 +3224,34 @@ Finverse3DTr <- function(
   yy   <- random3d(nsim = nsim, grid = grid, geo = geo)
   Knew <- as.matrix(yy[, -c(1, 2, 3)])   # n × nsim matrix of K values
 
+  ## ---- register parallel backend once for all iterations ----
+  cl <- parallel::makeCluster(ncore)
+  doParallel::registerDoParallel(cl)
+  on.exit(parallel::stopCluster(cl), add = TRUE)
+
+  setupTime <- difftime(Sys.time(), startTime, units = "secs")
+  message(sprintf("[setup] %.2f s (grid + ensemble + %d-core cluster)",
+                  as.numeric(setupTime), ncore))
+
   # ---- iteration loop --------------------------------------------------------
   niter    <- 1
   varmeanT <- 0
   rmse     <- 1e10
-  msgdf    <- data.frame(niter = niter, varmeanT = varmeanT, rmse = rmse)
   iterdf   <- list()
+  loopStart <- Sys.time()
 
   while (niter <= itermax & varmeanT < varmeanTmax & rmse > rmsemin) {
 
-    varT     <- apply(log(Knew), 1, var)
-    meanT    <- apply(log(Knew), 1, mean)
+    iter_start <- Sys.time()
+
+    lnKnew <- log(Knew)
+    meanT  <- rowMeans(lnKnew)
+    varT   <- rowMeans(lnKnew^2) - meanT^2
+    varT   <- varT * nsim / max(nsim - 1, 1)  # bias-corrected variance
     varmeanT <- var(meanT)
 
     # parallel transient forward runs for all ensemble members
+    t_forward <- Sys.time()
     obsh <- samHTmcPar3DTr(grid  = grid,
                            KK    = Knew,
                            Ss    = Ss,
@@ -3162,18 +3260,20 @@ Finverse3DTr <- function(
                            times = times,
                            lrw   = lrw,
                            ncore = ncore)
+    t_forward <- difftime(Sys.time(), t_forward, units = "secs")
 
     # ---- statistics ----------------------------------------------------------
     varobsh  <- apply(obsh, 2, var)
     meanobsh <- apply(obsh, 2, mean)
+    varobsh  <- pmax(varobsh, .Machine$double.eps)
     weigs    <- 1 / varobsh / sum(1 / varobsh)
     rmse     <- mean((trueobsh - meanobsh)^2 * weigs)^0.5
     l2       <- mean((trueobsh - meanobsh)^2)^0.5
     l1       <- mean(abs(trueobsh - meanobsh))
 
-    # ---- Bayesian update (same as steady-state) ------------------------------
+    # ---- Bayesian update -----------------------------------------------------
     covh  <- cov(obsh)
-    covhk <- cov(obsh, t(log(Knew)))
+    covhk <- cov(obsh, t(lnKnew))
     if (ifcor) {
       print("ifcor = TRUE: returning cross-covariance covhk.")
       return(covhk)
@@ -3182,33 +3282,34 @@ Finverse3DTr <- function(
     diag(covh1) <- rep((1 + mul) * max(diag(covh)), nobs)
     a <- solve(covh1, covhk)   # nobs × n
 
-    for (i in seq_len(nsim)) {
-      Knew[, i] <- Knew[, i] * exp(t(a) %*% (trueobsh - obsh[i, ]))
-    }
+    ### vectorized ensemble update (replaces serial for-loop)
+    delta <- matrix(trueobsh, nrow = nobs, ncol = nsim) - t(obsh)
+    Knew <- Knew * exp(t(a) %*% delta)
 
-    msg <- paste('niter =', niter,
-                 'varmeanT =', round(varmeanT, 4),
-                 'rmse =', round(rmse, 4),
-                 'l2 =', round(l2, 4),
-                 'l1 =', round(l1, 4))
-    print(msg)
+    iter_elapsed <- difftime(Sys.time(), iter_start, units = "secs")
+
+    msg <- sprintf("[iter %2d] varMeanT=%7.4f  rmse=%7.4f  L2=%7.4f  L1=%7.4f  |  total=%5.1fs  forward=%5.1fs",
+                   niter, round(varmeanT, 4), round(rmse, 4),
+                   round(l2, 4), round(l1, 4),
+                   as.numeric(iter_elapsed), as.numeric(t_forward))
+    message(msg)
 
     iterdf[[niter]] <- list(meanT    = as.vector(meanT),
                             varT     = as.vector(varT),
                             meanobsh = meanobsh,
                             varobsh  = varobsh)
 
-    if (niter == 1) {
-      print("--- time for one iteration ---")
-      print(difftime(Sys.time(), startTime))
-    }
-
     niter <- niter + 1
     mul   <- mul / decay
   }
 
-  print("--- total time ---")
-  print(difftime(Sys.time(), startTime))
+  loopTime  <- difftime(Sys.time(), loopStart, units = "secs")
+  totalTime <- difftime(Sys.time(), startTime,  units = "secs")
+  niters    <- niter - 1
+  message(sprintf("[done] %d iterations | loop: %.1f s (avg %.1f s/iter) | total: %.1f s",
+                  niters, as.numeric(loopTime),
+                  as.numeric(loopTime) / max(niters, 1),
+                  as.numeric(totalTime)))
   return(iterdf)
 }
 
@@ -3323,7 +3424,6 @@ samHTmcPar3DTrScreen <- function(grid,
 
   library('foreach')
   library('doParallel')
-  registerDoParallel(cores = ncore)
 
   nsim <- ncol(KK)
   x <- foreach(i = 1:nsim, .combine = rbind) %dopar% {
@@ -3331,7 +3431,6 @@ samHTmcPar3DTrScreen <- function(grid,
                                qHT = qHT, oHT = oHT, times = times, lrw = lrw)
   }
 
-  stopImplicitCluster()
   return(x)
 }
 
@@ -3429,20 +3528,34 @@ Finverse3DTrScreen <- function(
   yy   <- random3d(nsim = nsim, grid = grid, geo = geo)
   Knew <- as.matrix(yy[, -c(1, 2, 3)])
 
+  ## ---- register parallel backend once for all iterations ----
+  cl <- parallel::makeCluster(ncore)
+  doParallel::registerDoParallel(cl)
+  on.exit(parallel::stopCluster(cl), add = TRUE)
+
+  setupTime <- difftime(Sys.time(), startTime, units = "secs")
+  message(sprintf("[setup] %.2f s (grid + ensemble + %d-core cluster)",
+                  as.numeric(setupTime), ncore))
+
   # ---- iteration loop --------------------------------------------------------
   niter    <- 1
   varmeanT <- 0
   rmse     <- 1e10
-  msgdf    <- data.frame(niter = niter, varmeanT = varmeanT, rmse = rmse)
   iterdf   <- list()
+  loopStart <- Sys.time()
 
   while (niter <= itermax & varmeanT < varmeanTmax & rmse > rmsemin) {
 
-    varT     <- apply(log(Knew), 1, var)
-    meanT    <- apply(log(Knew), 1, mean)
+    iter_start <- Sys.time()
+
+    lnKnew <- log(Knew)
+    meanT  <- rowMeans(lnKnew)
+    varT   <- rowMeans(lnKnew^2) - meanT^2
+    varT   <- varT * nsim / max(nsim - 1, 1)  # bias-corrected variance
     varmeanT <- var(meanT)
 
     # parallel transient forward runs — screen-averaged
+    t_forward <- Sys.time()
     obsh <- samHTmcPar3DTrScreen(grid  = grid,
                                  KK    = Knew,
                                  Ss    = Ss,
@@ -3451,10 +3564,12 @@ Finverse3DTrScreen <- function(
                                  times = times,
                                  lrw   = lrw,
                                  ncore = ncore)
+    t_forward <- difftime(Sys.time(), t_forward, units = "secs")
 
     # ---- statistics ----------------------------------------------------------
     varobsh  <- apply(obsh, 2, var)
     meanobsh <- apply(obsh, 2, mean)
+    varobsh  <- pmax(varobsh, .Machine$double.eps)
     weigs    <- 1 / varobsh / sum(1 / varobsh)
     rmse     <- mean((trueobsh - meanobsh)^2 * weigs)^0.5
     l2       <- mean((trueobsh - meanobsh)^2)^0.5
@@ -3462,7 +3577,7 @@ Finverse3DTrScreen <- function(
 
     # ---- Bayesian update -----------------------------------------------------
     covh  <- cov(obsh)
-    covhk <- cov(obsh, t(log(Knew)))
+    covhk <- cov(obsh, t(lnKnew))
     if (ifcor) {
       print("ifcor = TRUE: returning cross-covariance covhk.")
       return(covhk)
@@ -3471,32 +3586,33 @@ Finverse3DTrScreen <- function(
     diag(covh1) <- rep((1 + mul) * max(diag(covh)), nobs)
     a <- solve(covh1, covhk)
 
-    for (i in seq_len(nsim)) {
-      Knew[, i] <- Knew[, i] * exp(t(a) %*% (trueobsh - obsh[i, ]))
-    }
+    ### vectorized ensemble update (replaces serial for-loop)
+    delta <- matrix(trueobsh, nrow = nobs, ncol = nsim) - t(obsh)
+    Knew <- Knew * exp(t(a) %*% delta)
 
-    msg <- paste('niter =', niter,
-                 'varmeanT =', round(varmeanT, 4),
-                 'rmse =', round(rmse, 4),
-                 'l2 =', round(l2, 4),
-                 'l1 =', round(l1, 4))
-    print(msg)
+    iter_elapsed <- difftime(Sys.time(), iter_start, units = "secs")
+
+    msg <- sprintf("[iter %2d] varMeanT=%7.4f  rmse=%7.4f  L2=%7.4f  L1=%7.4f  |  total=%5.1fs  forward=%5.1fs",
+                   niter, round(varmeanT, 4), round(rmse, 4),
+                   round(l2, 4), round(l1, 4),
+                   as.numeric(iter_elapsed), as.numeric(t_forward))
+    message(msg)
 
     iterdf[[niter]] <- list(meanT    = as.vector(meanT),
                             varT     = as.vector(varT),
                             meanobsh = meanobsh,
                             varobsh  = varobsh)
 
-    if (niter == 1) {
-      print("--- time for one iteration ---")
-      print(difftime(Sys.time(), startTime))
-    }
-
     niter <- niter + 1
     mul   <- mul / decay
   }
 
-  print("--- total time ---")
-  print(difftime(Sys.time(), startTime))
+  loopTime  <- difftime(Sys.time(), loopStart, units = "secs")
+  totalTime <- difftime(Sys.time(), startTime,  units = "secs")
+  niters    <- niter - 1
+  message(sprintf("[done] %d iterations | loop: %.1f s (avg %.1f s/iter) | total: %.1f s",
+                  niters, as.numeric(loopTime),
+                  as.numeric(loopTime) / max(niters, 1),
+                  as.numeric(totalTime)))
   return(iterdf)
 }

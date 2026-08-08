@@ -17,6 +17,7 @@ FinverseAdj(
   decay_lm = 2,
   geo = list(me = 0, var = 1, geomod = "Exp", anis = c(90, 1), range = 30, nugget = 0),
   m0 = NULL,
+  ncore = 1,
   ifcor = FALSE,
   ifvarTh = FALSE
 )
@@ -49,6 +50,11 @@ by \code{decay_lm} each iteration.}
 
 \item{m0}{initial log-T field, length \code{n} vector.  If \code{NULL}
 (default), uses the prior mean \code{geo$me} everywhere.}
+
+\item{ncore}{number of CPU cores for parallel adjoint solves (default 1).
+When \code{ncore > 1} and there are multiple observation wells, the
+inner loop of \code{\link{jacobian2D}} (adjoint solve per observation)
+is parallelized via \pkg{foreach} + \pkg{doParallel}.}
 
 \item{ifcor}{logical; if \code{TRUE}, returns the Jacobian matrix and
 forward response after the first iteration without performing the update.}

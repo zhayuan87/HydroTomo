@@ -72,6 +72,11 @@ forward response after the first iteration without performing the update.}
 
 \item{ifvarTh}{logical; if \code{TRUE}, computes and stores \code{varobsh}
 and \code{varT}.  Default \code{FALSE}.}
+
+\item{ncore}{number of CPU cores for parallel adjoint solves (default 1).
+When \code{ncore > 1} and there are multiple observation wells, the
+inner loop of \code{\link{jacobian2D}} (adjoint solve per observation)
+is parallelized via \pkg{foreach} + \pkg{doParallel}.}
 }
 \value{
 A list of per-iteration results (same structure as \code{\link{FinverseAdj}}).
