@@ -53,6 +53,18 @@ You can install the development version from GitHub:
 - **Visualization** — `Plotsteady2d()`, `Plotsteady3d()`, `covhkPlot2D()`, `inversePlot()`, `HydroPlot()`
   *Plot drawdown fields, cross-covariance maps, and inversion results.*
 
+# Parallel computing
+
+Both Monte Carlo (ensemble-based) and adjoint-based inversions are computationally demanding because they require solving the forward problem many times — once per ensemble member or once per observation point. HydroTomo addresses this through embarrassingly parallel execution using the `foreach` + `doParallel` framework.
+
+Two parallelization strategies are employed:
+
+1. **Ensemble parallelization** — Forward simulations for all ensemble members are distributed across available CPU cores. Each core independently runs the forward model for its assigned members, with no inter-process communication beyond the initial parameter distribution and final result collection.
+
+2. **Adjoint parallelization** — Adjoint-state sensitivity computations for all observation points are executed in parallel across cores. Since each adjoint solve is independent of the others, this also achieves near-linear speedup.
+
+The user controls the number of cores via the `ncore` parameter in applicable functions. The realized speedup depends on grid size, ensemble/observation count, solver choice, and hardware configuration.
+
 # Background 
 
 This package is developed for doing Hydraulic Tomography (HT) inversion in R. The HT technique or philosophy is to conduct multiple pumping tests in a confined aquifer and use the drawdown data to estimate the heterogeneous hydraulic conductivity field. The package contains functions for generating random hydraulic conductivity fields, simulating steady-state groundwater flow under pumping test conditions, performing HT inversion using geostatistical approach, and visualizing the results. 
